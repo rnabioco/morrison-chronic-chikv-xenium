@@ -1,0 +1,54 @@
+
+```{r "packages", include = FALSE}
+# Bioconductor
+library(clusterProfiler)
+library(enrichplot)
+library(msigdbr)
+library(DOSE)
+library(biomaRt)
+library(org.Mm.eg.db)
+library(org.Hs.eg.db)
+
+# Tidyverse
+library(tidyverse)
+library(broom)
+library(here)
+library(cowplot)
+library(xlsx)
+library(furrr)
+
+# Plotting
+library(ggtrace)
+library(colorblindr)
+library(djvdj)
+library(scales)
+library(ggrepel)
+library(patchwork)
+library(ggupset)
+library(plotly)
+library(ggspruce)
+library(htmlwidgets)
+
+# scRNA-seq analysis
+library(Seurat)
+library(clustifyr)
+library(clustifyrdata)
+library(scuttle)
+library(DoubletFinder)
+library(M3Drop)
+library(presto)
+library(gprofiler2)
+library(harmony)
+library(metap)
+library(edgeR)
+library(qs)
+
+# Rendering
+library(quarto)
+library(knitr)
+library(cli)
+
+source(here(params$template_dir, "funs.R"))
+```
+
+```

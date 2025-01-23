@@ -1,0 +1,907 @@
+---
+title: "Chronic CHIKV Xenium analysis"
+author: "Ryan Sheridan"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc:            true
+    toc_float:      true
+    toc_depth:      2
+    df_print:       "paged"
+    code_folding:   "hide"
+    self_contained: true
+params:
+  template_dir: "src"                     # Directory for Rmd templates
+  ref_dir:      "ref"
+  table_dir:    "results/tables/2024-03-29"          # Directory to write tables
+  overwrite:    false                     # Should tables be overwritten if they already exist?
+  so_dir:       "~/Dropbox/Ryan/Projects/morrison-chronic-chikv/results/sobjs/2024-01-22_4" # Directory for Seurat objects
+  treatment_levels: ["mock", "CHIKV"]  # order as control, treatment, order affects how marker genes are identified
+  xen_obj_dir:      "~/Dropbox/Ryan/Projects/morrison-chronic-chikv/results/xenium"  # Directory to save Xenium objects
+  xen_ref:          "~/Dropbox/Ryan/Projects/morrison-chronic-chikv/results/sobjs/2024-01-22_4/so.qs"
+  xen_data_dir:     "results/xenium/20241212__000859__Morrison_Run1"                 # Directory with Xenium data
+  xen_data_regex:
+  xen_sample_regex: "TR-2-24[A-Z]+"                                                  # Regex to extract sample IDs from directories
+  xen_sample_names:
+    value:
+      TR-2-24A: "mock-1"                                                             # New sample names for extracted sample IDs
+      TR-2-24B: "mock-2"
+      TR-2-24C: "mock-3"
+      TR-2-24D: "CHIKV-1"
+      TR-2-24E: "CHIKV-2"
+      TR-2-24F: "CHIKV-3"
+  xen_targets:      "ref/QX42XM_mMulti_98g_custom_sequences.csv"                     # Custom non-endogenous targets in panel
+  xen_key_targets:
+    value:
+      CHIKV_sgRNA: "CHIKV-sgRNA-(7566-12036)"
+      CHIKV_5:     "CHIKV-5-(0-7566)"                                                # Custom targets to quantify
+      CHIKV_neg:   "CHIKV-negative-(0-12036)"
+editor_options: 
+  chunk_output_type: console
+---
+
+<br>
+
+## Summary
+
+* Cell types were annotated using CHIKV 28 dpi scRNA-seq data
+* Macrophages harbor CHIKV RNA, but more work is needed to assess enrichment of
+  CHIKV+ cells in different cell populations
+* Signal was detected for CHIKV sgRNA, 5' (nsP genes), and negative strand probes
+* The strongest CHIKV signal was detected for sgRNA probes
+
+<u>To do</u>
+
+* Refine/verify cell type annotations
+* Further assessment of CHIKV+ cells
+* Identification of differentially expressed genes in CHIKV-infected samples
+
+<br>
+
+<br>
+
+---
+
+```{r "setup", include = FALSE}
+# Default chunk options
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  echo    = FALSE,
+  dpi     = 250
+)
+
+# Setup chunks
+knitr::knit(here::here(params$template_dir, "setup.qmd"), output = "")
+
+# Knit Xenium template
+# * Objects storing strings should be evaluated before passing to template, and
+#   should not be quoted
+# * Objects storing other data structures, e.g., lists, must be evaluated within
+#   the template and should be quoted
+chunk_params <- list(
+  file           = here(params$template_dir, "setup-xenium.qmd"),
+  obj_prfx       = "xen",
+  obj_dir        = params$xen_obj_dir,
+  ref_obj        = params$xen_ref,
+  data_dir       = params$xen_data_dir,
+  data_regex     = params$xen_data_regex,
+  sample_regex   = params$xen_sample_regex,
+  sample_names   = "params$xen_sample_names",  # quote list objects
+  sample_delim   = "-",
+  custom_targets = params$xen_targets,
+  key_targets    = "params$xen_key_targets",   # quote list objects
+  top_types      = "Macrophages"
+)
+
+chunks <- do.call(knit_expand, chunk_params)
+
+knit(text = chunks, output = "")
+```
+
+```{r "format data"}
+# Cell to plot
+plt_cells <- colnames(small)
+
+# Sample levels
+sam_lvls <- unname(params$xen_sample_names) %>%
+  unlist() %>%
+  unique()
+
+# Key features
+key_feats <- names(params$xen_key_targets)
+
+# Format plotting data
+clmns <- c(
+  ".cell_id", "sample", "fov", "cell_type",
+  "nCount_Xenium", "nCount_Xenium_custom",
+  "cell_class", "class_type",
+  key_feats
+)
+
+xen_dat <- xen@meta.data %>%
+  as_tibble(rownames = ".cell_id") %>%
+  dplyr::select(
+    all_of(clmns),
+    any_of(c("treatment", "rep")),
+    matches("^[xy]_cell$")
+  ) %>%
+  mutate(
+    across(
+      all_of(key_feats),
+      ~ .x / (nCount_Xenium + nCount_Xenium_custom),
+      .names = "frac_{.col}"
+    )
+  ) %>%
+  rowwise() %>%
+  mutate(
+    nCount_key_feats = sum(!!!syms(key_feats))
+  ) %>%
+  ungroup() %>%
+  mutate(
+    frac_key_feats = nCount_key_feats / (nCount_Xenium + nCount_Xenium_custom)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    sample     = fct_relevel(sample, sam_lvls),
+    cell_class = fct_relevel(cell_class, c("low", "high")),
+    fov_lab    = str_extract(fov, "[A-Z]$"),
+    fov_lab    = str_c(sample, "\n", fov)
+  )
+
+# Set replicate if not already set
+if (!"rep" %in% colnames(xen_dat)) {
+  xen_dat <- xen_dat %>%
+    group_by(sample) %>%
+    mutate(rep = as.numeric(factor(fov))) %>%
+    ungroup()
+}
+
+# Set FOV levels
+fov_lvls <- xen_dat %>%
+  arrange(sample) %>%
+  distinct(fov, fov_lab)
+
+fov_lvls <- set_names(fov_lvls$fov_lab, fov_lvls$fov)
+
+fovs <- names(fov_lvls)
+
+xen_dat <- xen_dat %>%
+  mutate(fov = fct_relevel(fov, names(fov_lvls))) %>%
+  arrange(fov) %>%
+  mutate(fov_lab = fct_inorder(fov_lab))
+
+small_dat <- xen_dat %>%
+  filter(.cell_id %in% plt_cells)
+```
+
+```{r "theme"}
+# ggplot2 themes
+txt_pt1  <- 10
+txt_pt2  <- 12
+ttl_pt1  <- 14
+ttl_pt2  <- 16
+ln_pt    <- 0.5
+ln_col   <- "grey85"
+cir_size <- 3.5
+sqr_size <- 4
+
+txt_theme_1 <- theme(
+  strip.text   = element_text(size = ttl_pt2),
+  legend.text  = element_text(size = ttl_pt1),
+  axis.title   = element_text(size = ttl_pt2),
+  axis.text    = element_text(size = txt_pt2, color = "black"),
+  legend.title = element_text(size = ttl_pt2),
+)
+
+line_theme <- theme(
+  axis.line.x  = element_line(linewidth = ln_pt, color = ln_col),
+  axis.line.y  = element_line(linewidth = ln_pt, color = ln_col),
+  axis.ticks.x = element_line(linewidth = ln_pt, color = ln_col),
+  axis.ticks.y = element_line(linewidth = ln_pt, color = ln_col)
+)
+
+base_theme <- djvdj_theme() +
+  theme(
+    plot.title       = element_text(face = "plain", size = ttl_pt2),
+    strip.background = element_blank(),
+    strip.text       = element_text(face = "plain")
+  ) +
+  txt_theme_1
+
+umap_theme <- base_theme +
+  theme(
+    panel.border = element_rect(color = NA, fill = NA),
+    axis.title   = element_blank(),
+    axis.line.x  = element_blank(),
+    axis.line.y  = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.text    = element_blank()
+  )
+
+umap_theme_2 <- umap_theme %+replace%
+  theme(panel.border = element_rect(colour = ln_col, linewidth = ln_pt, fill = NA))
+
+fade_0 <- "#FAFAFA"
+fade_1 <- "#F0F0F0"
+fade_2 <- "#D9D9D9"
+
+# Colors
+# Okabe Ito color palettes
+ito_cols <- c(
+  palette_OkabeIto[c(1:3, 5)], "#D7301F",
+  palette_OkabeIto[c(4, 6)],   "#6A51A3",
+  palette_OkabeIto[7],         "#875C04",
+  "#065D43", "#F7AF34", "#00446E"
+)
+
+ito_cols <- ito_cols[3:length(ito_cols)] %>%
+  darken(0.2) %>%
+  c(ito_cols, ., "#686868", "#000000")
+
+clrs <- ito_cols
+
+# Cell type colors
+typs <- unique(xen$cell_type)
+
+typ_clrs <- set_names(
+  clrs[seq_along(typs)],
+  typs
+)
+
+typ_clrs <- typ_clrs %>%
+  spruce_colors(difference = Inf, filter = "colorblind")
+
+typ_clrs[c("other", "low")] <- "grey85"
+typ_clrs["Macrophages"]     <- "#D7301F"
+
+typ_clrs["Fibroblasts"] <- darken(typ_clrs["Fibroblasts"], 0.75)
+
+# typ_clrs[c("LEC", "BEC", "cDC1")] <- c("#D7301F", "#0072B2", "#6A51A3")
+# typ_clrs[c("LEC", "BEC", "cDC1")] <- c("#56B4E9", "#D7301F", "#6A51A3")
+# typ_clrs[c("LEC", "cDC1", "Monocytes", "B cells")] <- c("#0072B2", "#6A51A3", "#D55E00", "#56B4E9")
+# typ_clrs["Macrophages"] <- "black"
+
+top_typ_clrs <- typ_clrs
+top_typ_clrs[!names(top_typ_clrs) %in% top_types] <- "grey85"
+
+top_typ_clrs_2 <- top_typ_clrs
+top_typ_clrs_2[!names(top_typ_clrs_2) %in% top_types] <- "grey99"
+
+# # Sample colors
+# sam_clrs <- set_names(
+#   c("#009E73", "#0072B2", "#56B4E9"),
+#   c(sam_lvls, "Mock")
+# )
+```
+
+```{r "QC", eval = FALSE}
+# Format plotting data
+feats <- c(
+  "sample", "fov", "cell_type",
+  "nCount_Xenium", "nCount_Xenium_custom"
+)
+
+DefaultAssay(xen) <- "Xenium_custom"
+
+qc_dat <- xen %>%
+  FetchData(c(feats, custom_targets)) %>%
+  as_tibble(rownames = ".cell_id") %>%
+  pivot_longer(all_of(custom_targets))
+
+# Format heatmap data
+heat_dat <- qc_dat %>%
+  group_by(fov, name) %>%
+  mutate(
+    tot_counts = sum(nCount_Xenium + nCount_Xenium_custom)
+  ) %>%
+  group_by(name, fov, sample, tot_counts) %>%
+  summarize(
+    value   = sum(value),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    frac   = value / tot_counts,
+    fov    = fct_relevel(fov, names(fov_lvls)),
+    sample = fct_relevel(sample, sam_lvls)
+  )
+
+# Tiles to outline
+top_dat <- heat_dat %>%
+  filter(frac >= 0.0001)
+
+# Tiles to label
+lab_dat <- heat_dat %>%
+  filter(frac >= 0.0001) %>%
+  mutate(
+    lab = round(frac * 100, 2),
+    lab = str_c(lab, "%")
+  )
+
+# Create heatmap
+heat_dat %>%
+  ggplot(aes(fov, name, fill = frac + 0.0001)) +
+  geom_tile() +
+  geom_tile(
+    data = top_dat,
+    color = "black"
+  ) +
+  geom_text(
+    aes(color = NULL, fill = NULL, label = lab),
+    data = lab_dat
+  ) +
+  facet_grid(~ sample, space = "free", scales = "free") +
+  scale_fill_gradientn(colours = c("white", "#D7301F"), labels = label_percent(), trans = "log10") +
+  scale_color_manual(values = c(`TRUE` = "black", `FALSE` = "white")) +
+  base_theme +
+  theme(
+    # aspect.ratio       = n_distinct(heat_dat$fov) / n_distinct(heat_dat$name),
+    strip.clip         = "off",
+    strip.text.y.right = element_text(angle = 0, hjust = 0),
+    axis.text.x        = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+
+
+# # Boxplots
+# qc_dat %>%
+#   ggplot(aes(cell_type, value + 1, fill = cell_type)) +
+#   geom_boxplot(outlier.size = 0.1) +
+#   facet_grid(name ~ fov, scales = "free") +
+#   scale_y_log10() +
+#   base_theme +
+#   theme(
+#     strip.clip         = "off",
+#     strip.text.y.right = element_text(angle = 0),
+#     axis.text.x        = element_text(angle = 90, vjust = 0.5, hjust = 1)
+#   )
+```
+
+## Cell types
+
+Cell types were annotated using 28 dpi CHIKV scRNA-seq data.
+Annotated cell types are shown for tissue sections.
+All `r str_flatten(top_types, collapse = ", ", last = " and ")`
+and all CHIKV+ cells are shown,
+all other cells were downsampled for visualization.
+
+```{r "cell type sections", fig.width = 12, fig.height = 10}
+# Legend labels
+cell_n <- xen@meta.data %>%
+  group_by(cell_type) %>%
+  summarize(n = n(), .groups = "drop") %>%
+  mutate(
+    pct   = round((n / sum(n)) * 100, 1),
+    n_lab = ifelse(
+      n >= 1000,
+      str_c(round(n / 1000, 1), "k"),
+      label_comma()(n)
+    ),
+    n_lab = str_c(cell_type, " (", n_lab, ", ", pct, "%)")
+  ) %>%
+  arrange(desc(n))
+
+lgnd_labs <- set_names(cell_n$n_lab, cell_n$cell_type)
+
+# Create section plots
+Idents(small) <- small$cell_type
+
+plts <- fovs %>%
+  map(~ {
+    p <- small_dat %>%
+      filter(fov == .x) %>%
+      ggplot(aes(x_cell, -y_cell, color = cell_type)) +
+      geom_point(size = 0.25) +
+      guides(color = guide_legend(override.aes = list(shape = 15, size = 4))) +
+      scale_color_manual(values = typ_clrs) +
+      labs(tag = fov_lvls[.x]) +
+      coord_fixed() +
+      umap_theme +
+      theme(
+        legend.position   = "none",
+        plot.tag.position = c(0.15, 0.95),
+        plot.tag          = element_text(size = ttl_pt2)
+      )
+    p
+  })
+
+plts <- plts %>%
+  wrap_plots(
+    nrow = 2,
+    guides = "collect"
+  )
+
+# Create heatmaps
+ht_dat <- xen_dat %>%
+  group_by(sample) %>%
+  mutate(n = n_distinct(.cell_id)) %>%
+  group_by(sample, cell_type, n) %>%
+  summarize(n_type = n_distinct(.cell_id), .groups = "drop") %>%
+  mutate(
+    pct_type = n_type / n,
+    n_lab    = if_else(
+      n_type >= 1000,
+      str_c(round(n_type / 1000, 1), "k"),
+      as.character(n_type)
+    ),
+    cell_type = fct_reorder(cell_type, pct_type, .desc = TRUE)
+  )
+
+ht <- ht_dat %>%
+  ggplot(aes(sample, pct_type, fill = cell_type)) + 
+  geom_col() +
+  geom_text(
+    aes(label = n_lab, fill = NULL),
+    vjust = 0
+  ) +
+  facet_wrap(~ cell_type, scale = "free_y") +
+  scale_fill_manual(values = typ_clrs) +
+  scale_y_continuous(labels = label_percent(), expand = expansion(c(0.05, 0.2))) +
+  labs(y = "% of total cells") +
+  base_theme +
+  theme(
+    legend.position = "none",
+    axis.title.x    = element_blank(),
+    axis.text.x     = element_text(angle = 45, hjust = 1),
+    axis.text.y     = element_text(size = txt_pt1)
+  )
+
+# Create final figure
+fig <- plot_grid(
+  plts, ht,
+  ncol = 1,
+  rel_heights = c(1, 0.7)
+)
+
+fig
+```
+
+<br>
+
+### {.tabset .tabset-pills}
+
+High resolution images show all cells (left) or all cells with
+`r str_flatten(top_types, collapse = ", ", last = " and ")`
+highlighted (right).
+
+```{r "hi res cell types sections", fig.width = 45, fig.height = 10, results = "asis", out.height = "70%"}
+fovs %>%
+  walk(~ {
+    cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
+    
+    fig <- xen_dat %>%
+      .plot_full_fov(
+        fov   = .x,
+        color = "cell_type",
+        trace = list("NONE", "Macrophages"),
+        clrs  = typ_clrs
+      ) %>%
+      plot_grid(
+        plotlist = .,
+        nrow  = 1,
+        align = "h",
+        axis  = "tb"    
+      )
+    
+    print(fig)
+    cat("\n\n<br>\n\n<br>\n\n")
+  })
+```
+
+###
+
+### Annotation confidence
+
+The per-cell prediction confidence for cell type annotations is shown below.
+Scores approaching 1 indicate higher confidence.
+
+```{r "pred confidence", fig.width = 9, fig.height = 4, out.width = "70%"}
+dat <- xen@meta.data %>%
+  mutate(
+    cell_type = fct_reorder(cell_type, pred_conf, .desc = TRUE)
+  )
+
+dat %>%
+  ggplot(aes(cell_type, pred_conf, fill = cell_type)) +
+  geom_boxplot(outlier.size = 0.2) +
+  facet_wrap(~ sample) +
+  scale_fill_manual(values = typ_clrs) +
+  labs(y = "prediction confidence") +
+  base_theme +
+  theme(
+    legend.position = "none",
+    axis.text.x     = element_text(angle = 45, hjust = 1),
+    axis.title.x    = element_blank()
+  )
+```
+
+<br>
+
+### {.tabset .tabset-pills}
+
+Expression of marker genes is shown below.
+The % of cells expressing each gene is shown above each boxplot.
+
+```{r "cell type markers"}
+gns <- c(
+  "Ptprc",
+  "Cd3d", "Cd19",            # B/T cells
+  "Mrc1", "Folr2", "Cx3cr1", # macrophages
+  "Aqp1",
+  "Serpinf1",                # fibroblasts
+  "Cd34", "Pecam1",          # endothelial cells
+  "Itgax",                   # DCs
+  "Csf3r",                   # neutrophil
+  # "Irf7",                  # monocytes
+  "Acta2", "Itga7",          # PvCs
+  "Ttn"                      # skeletal muscle
+)
+
+plts <- sam_lvls %>%
+  set_names() %>%
+  map(~ {
+    sam <- .x
+    
+    plt <- gns %>%
+      map(~ {
+        dat <- xen %>%
+          FetchData(c("sample", "cell_type", .x)) %>%
+          filter(sample == sam)
+        
+        n_expr <- dat %>%
+          group_by(cell_type) %>%
+          summarize(
+            med     = median(!!sym(.x)),
+            n       = n(),
+            n_expr  = sum(!!sym(.x) > 0),
+            .groups = "drop"
+          ) %>%
+          mutate(
+            pct_expr = n_expr / n,
+            pct_lab  = label_percent()(round(pct_expr, 2))
+          )
+        
+        lvls <- n_expr %>%
+          arrange(desc(med), desc(pct_expr)) %>%
+          pull(cell_type)
+        
+        dat %>%
+          plot_violin(
+            .x,
+            cluster_col   = "cell_type",
+            plot_colors   = typ_clrs,
+            plot_lvls     = lvls,
+            method        = "boxplot",
+            color         = "black",
+            alpha         = 1,
+            outlier.size  = 0.5,
+            outlier.alpha = 1
+          ) +
+          scale_y_continuous(expand = expansion(c(0.05, 0.2))) +
+          geom_text(
+            aes(cell_type, Inf, label = pct_lab, fill = NULL),
+            data = n_expr,
+            vjust = 1.5,
+            color = "black",
+            size  = 8 / .pt
+          )
+      }) %>%
+      plot_grid(
+        plotlist = .,
+        ncol     = 3,
+        align    = "vh",
+        axis     = "trbl"
+      )
+  })
+```
+
+```{r "cell type markers 2", fig.width = 15, fig.height = 15, results = "asis"}
+plts %>%
+  iwalk(~ {
+    cat("\n\n####", .y, "\n\n")
+    print(.x)
+    cat("\n\n---\n\n<br>\n\n<br>\n\n")
+  })
+```
+
+###
+
+## CHIKV infection
+
+### Macrophages harbor CHIKV RNA {.tabset .tabset-pills}
+
+CHIKV+ cells (>0 total CHIKV counts) are shown for tissue sections.
+
+```{r "CHIKV+ cell types", fig.width = 17, fig.height = 11}
+.create_class_figure(
+  bar_dat       = xen_dat,
+  plot_dat      = small,
+  class_clmn    = "cell_class",
+  class         = "high",
+  celltype_clmn = "cell_type",
+  clrs          = typ_clrs,
+  top_types     = top_types,
+  nrow          = 3,
+  y_ttl         = "% CHIKV+ cells",
+  alph          = rep(1, n_distinct(xen_dat$rep))
+)
+```
+
+<br>
+
+High-resolution images show CHIKV counts for each tissue section.
+
+```{r, fig.width = 20, fig.height = 10, results = "asis", out.height = "50%"}
+fovs %>%
+  walk(~ {
+    cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
+    
+    fig <- xen_dat %>%
+      .plot_full_fov_signal(
+        fov    = .x,
+        color  = "nCount_key_feats",
+        clrs   = c("white", "#D7301F"),
+        ttl    = "CHIKV\ncounts + 1",
+        pseudo = 1,
+        trans  = "log10"
+      )
+    
+    print(fig)
+    cat("\n\n")
+  })
+```
+
+###
+
+The fraction of total counts originating from CHIKV probes is shown below
+for all cells (top) or CHIKV+ cells (bottom).
+Cell types with <20 cells are not shown.
+The number of cells identified for each cell type is shown above each boxplot.
+
+```{r "CHIKV COUNTS CELL TYPES", fig.width = 15, fig.height = 6}
+# Format CHIKV cell type data
+type_dat <- xen_dat %>%
+  group_by(sample, cell_type) %>%
+  filter(n() > 20) %>%
+  ungroup() %>%
+  mutate(
+    cell_type = fct_reorder(cell_type, frac_key_feats, mean, .desc = TRUE),
+    sample = fct_relevel(sample, sam_lvls)
+  )
+
+# Format N labels
+n_dat <- type_dat %>%
+  group_by(sample, cell_type) %>%
+  summarize(n = n(), .groups = "drop") %>%
+  mutate(
+    n_lab = if_else(
+      n > 1000,
+      str_c(round(n / 1000, 1), "k"),
+      label_comma()(n)
+    )
+  )
+
+# Fraction CHIKV reads boxplots
+pseudo <- 0.01
+
+type_dat %>%
+  ggplot(aes(cell_type, frac_key_feats + pseudo, fill = cell_type, alpha = as.character(rep))) +
+  geom_boxplot(
+    outlier.size = 0.1,
+    outlier.alpha = 1
+  ) +
+  geom_text(
+    aes(y = Inf, label = n_lab, alpha = NULL, fill = NULL),
+    data = n_dat,
+    size = txt_pt1 / .pt,
+    vjust = 1.25
+  ) +
+  facet_wrap(~ sample) +
+  scale_y_log10(expand = expansion(c(0.05, 0.2)), labels = label_percent()) +
+  scale_fill_manual(values = typ_clrs) +
+  scale_alpha_manual(values = c("1" = 1, "2" = 0.75, "3" = 0.5, "4" = 0.25)) +
+  guides(fill = "none", alpha = "none") +
+  labs(title = "all cells", y = str_c("% CHIKV counts + ", pseudo * 100)) +
+  base_theme +
+  theme(
+    panel.background = element_rect(fill = NA, color = "grey75", linewidth = ln_pt),
+    axis.title.x = element_blank(),
+    axis.text.x  = element_text(angle = 45, hjust = 1)
+  )
+```
+
+```{r "CHIKV SIGNAL CELL TYPES", fig.width = 15, fig.height = 4}
+# Format N labels
+dat <- xen_dat %>%
+  filter(treatment == "CHIKV", cell_class == "high") %>%
+  group_by(sample, cell_type) %>%
+  filter(n() > 20) %>%
+  ungroup() %>%
+  mutate(
+    cell_type = fct_reorder(cell_type, frac_key_feats, mean, .desc = TRUE),
+    sample = fct_relevel(sample, sam_lvls)
+  )
+
+n_dat <- dat %>%
+  group_by(sample, cell_type) %>%
+  summarize(n = n(), .groups = "drop") %>%
+  mutate(
+    n_lab = if_else(
+      n > 1000,
+      str_c(round(n / 1000, 1), "k"),
+      label_comma()(n)
+    )
+  )
+
+# Fraction CHIKV reads boxplots
+dat %>%
+  ggplot(aes(cell_type, frac_key_feats, fill = cell_type)) +
+  geom_boxplot(
+    outlier.size = 0.1,
+    outlier.alpha = 1
+  ) +
+  geom_text(
+    aes(y = Inf, label = n_lab, alpha = NULL, fill = NULL),
+    data = n_dat,
+    size = txt_pt1 / .pt,
+    vjust = 1.25
+  ) +
+  facet_wrap(~ sample) +
+  scale_y_log10(expand = expansion(c(0.05, 0.2)), labels = label_percent()) +
+  scale_fill_manual(values = typ_clrs) +
+  guides(fill = "none", alpha = "none") +
+  labs(title = "CHIKV+ cells", y = str_c("% CHIKV counts")) +
+  base_theme +
+  theme(
+    aspect.ratio = 0.7,
+    panel.background = element_rect(fill = NA, color = "grey75", linewidth = ln_pt),
+    axis.title.x = element_blank(),
+    axis.text.x  = element_text(angle = 45, hjust = 1)
+  )
+```
+
+<br>
+
+<br>
+
+### CHIKV signals are higher for sgRNA probes
+
+The % CHIKV+ cells is shown for each cell type.
+The number of CHIKV+ cells is shown above each bar.
+
+```{r "CHIKV+ bargraphs", fig.width = 10, fig.height = 4, out.width = "70%"}
+frac_clmns <- str_c("frac_", key_feats)
+
+dat <- xen_dat %>%
+  filter(treatment == "CHIKV") %>%
+  group_by(cell_type) %>%
+  mutate(n = n()) %>%
+  pivot_longer(all_of(key_feats)) %>%
+  ungroup() %>%
+  group_by(cell_type, name, n) %>%
+  summarize(
+    n_pos   = sum(value > 0),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    frac_pos = n_pos / n,
+    across(
+      c(n, n_pos),
+      ~ if_else(.x >= 1000, str_c(round(n / 1000, 1), "k"), as.character(.x))
+    ),
+    n_lab     = str_c(n_pos, "/", n),
+    name      = fct_relevel(name, key_feats),
+    cell_type = fct_reorder(cell_type, frac_pos, .desc = TRUE)
+  )
+
+# Create bargraphs
+dat %>%
+  ggplot(aes(cell_type, frac_pos, fill = cell_type)) +
+  geom_col() +
+  geom_text(
+    aes(label = n_lab, fill = NULL),
+    angle = 90, hjust = 0
+  ) +
+  facet_wrap(~ name) +
+  scale_fill_manual(values = typ_clrs) +
+  scale_y_continuous(expand = expansion(c(0.05, 0.25)), labels = label_percent()) +
+  labs(y = "% CHIKV+ cells") +
+  base_theme +
+  theme(
+    legend.position = "none",
+    axis.text.x     = element_text(angle = 45, hjust = 1),
+    axis.title.x    = element_blank()
+  )
+
+```
+
+<br>
+
+Total counts assigned to sgRNA, 5' (nsP genes), and
+negative strand CHIKV probes is shown for CHIKV+ cells.
+The number of cells plotted is shown above each boxplot.
+
+```{r "CHIKV SIGNAL TYPES", fig.width = 15, fig.height = 4}
+# CHIKV signal colors
+key_nms <- set_names(
+  key_feats,
+  str_c("frac_", key_feats)
+)
+
+chikv_clrs <- set_names(c("#D7301F", "#0072B2", "#009E73"), names(key_nms))
+
+# Top cell types with detectable CHIKV RNA
+chikv_types <- xen_dat %>%
+  filter(treatment == "CHIKV", cell_class == "high") %>%
+  mutate(cell_type = fct_reorder(cell_type, frac_key_feats, mean, .desc = TRUE)) %>%
+  pull(cell_type) %>%
+  sort() %>%
+  table()
+
+chikv_types <- names(chikv_types[chikv_types > 50][1:3])
+
+plts <- chikv_types %>%
+  map(~ {
+    dat <- xen_dat %>%
+      filter(cell_type == .x, treatment == "CHIKV", cell_class == "high") %>%
+      pivot_longer(all_of(key_feats))
+    
+    clrs <- set_names(
+      unname(chikv_clrs),
+      key_feats
+    )
+    
+    dat <- dat %>%
+      mutate(name = fct_relevel(name, key_feats))
+    
+    y_ttl <- "CHIKV counts + 1"
+    
+    n_dat <- dat %>%
+      group_by(sample) %>%
+      summarize(n = n_distinct(.cell_id), .groups = "drop") %>%
+      mutate(n_lab = label_comma()(n))
+    
+    dat %>%
+      ggplot(aes(sample, value + 1, fill = name)) +
+      geom_boxplot(
+        outlier.size = 0.1,
+        outlier.alpha = 1
+      ) +
+      geom_text(
+        aes(y = Inf, label = n_lab, fill = NULL),
+        data  = n_dat,
+        color = "black",
+        vjust = 1.25
+      ) +
+      scale_y_log10(expand = expansion(c(0.05, 0.2))) +
+      scale_fill_manual(values = clrs) +
+      labs(title = str_c("CHIKV+ ", .x), y = y_ttl) +
+      base_theme +
+      theme(
+        aspect.ratio     = 1,
+        plot.margin      = margin(15, 15, 15, 30, "pt"),
+        panel.background = element_rect(fill = NA, color = "grey75", linewidth = ln_pt),
+        legend.title     = element_blank(),
+        axis.title.x     = element_blank(),
+        axis.text.x      = element_text(angle = 45, hjust = 1)
+      )
+  })
+
+wrap_plots(
+  plts,
+  guides = "collect",
+  nrow = 1
+)
+```
+
+---
+
+<br>
+
+<br>
+
+## Session info
+
+```{r}
+sessionInfo()
+```

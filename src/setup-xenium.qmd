@@ -1,0 +1,653 @@
+
+```{r "{{obj_prfx}} manual params", eval = FALSE, include = FALSE}
+obj_prfx       <- "xen"
+obj_dir        <- params$xen_obj_dir
+ref_obj        <- params$xen_ref
+data_dir       <- params$xen_data_dir
+data_regex     <- params$xen_data_regex
+sample_regex   <- params$xen_sample_regex
+sample_names   <- as_vector(params$xen_sample_names)
+sample_delim   <- "-"
+custom_targets <- params$xen_targets
+key_targets    <- params$xen_key_targets
+top_types      <- "Macrophages"
+```
+
+```{r "{{obj_prfx}} params", include = FALSE}
+# Slide to process
+obj_prfx       <- "{{obj_prfx}}"
+obj_dir        <- "{{obj_dir}}"
+ref_obj        <- "{{ref_obj}}"
+data_dir       <- "{{data_dir}}"
+data_regex     <- "{{data_regex}}"
+sample_regex   <- "{{sample_regex}}"
+sample_names   <- as_vector({{sample_names}})
+sample_delim   <- "{{sample_delim}}"
+custom_targets <- "{{custom_targets}}"
+key_targets    <- {{key_targets}}
+top_types      <- "{{top_types}}"
+```
+
+```{r "{{obj_prfx}} setup"}
+# Custom targets
+custom_targets <- here(custom_targets) %>%
+  read_csv(col_types = cols_only("c")) %>%
+  pull(1) %>%
+  unique()
+
+# Clustering resolution
+xen_clst_rsln <- 10
+
+create_sobjs <- !file.exists(here(obj_dir, str_c(obj_prfx, ".qs")))
+```
+
+```{r "{{obj_prfx}} functions"}
+.plot_full_fov <- function(df_in, fov_in, color, x = "x_cell", y = "y_cell", trace = list(), clrs,
+                           size = 0.3, trace_size = 1, trace_clr = "black") {
+  
+  # Format input data
+  plt_theme <- umap_theme +
+    theme(
+      legend.title = element_blank(),
+      legend.text  = element_text(size = 28)
+    )
+  
+  dat <- df_in %>%
+    filter(fov == fov_in)
+  
+  n_dat <- dat %>%
+    group_by(!!sym(color)) %>%
+    summarize(n = n(), .groups = "drop") %>%
+    mutate(
+      n_lab = str_c(!!sym(color), "\nn = ", label_comma()(n))
+    )
+  
+  # Plot highlighted cells
+  res <- trace %>%
+    map(~ {
+      n_dat <- n_dat %>%
+        arrange(desc(!!sym(color) %in% .x), desc(n))
+      
+      n_labs <- set_names(n_dat$n_lab, n_dat[[color]])
+      
+      dat %>%
+        mutate(!!sym(color) := fct_relevel(!!sym(color), names(n_labs))) %>%
+        arrange(!!sym(color)) %>%
+        ggplot(aes(!!sym(x), -(!!sym(y)), fill = !!sym(color))) +
+        geom_point_trace(
+          trace_position    = !!sym(color) %in% .x,
+          background_params = list(size = size, color = NA),
+          size  = trace_size,
+          color = trace_clr
+        ) +
+        scale_fill_manual(values = clrs, labels = n_labs) +
+        guides(fill = guide_legend(override.aes = list(size = 10, color = NA))) +
+        coord_fixed() +
+        plt_theme
+    })
+  
+  if (length(trace) == 1) res <- res[[1]]
+  
+  res
+}
+
+.plot_full_fov_signal <- function(df_in, fov_in, color, x = "x_cell", y = "y_cell",
+                                  clrs = c("white", "#D7301F"),
+                                  size = 0.3, pseudo = 1, trans = "log10",
+                                  ttl = NULL, ...) {
+  
+  # Format input data
+  plt_theme <- umap_theme +
+    theme(
+      legend.key.height = unit(30, "pt"),
+      legend.key.width  = unit(7, "pt"),
+      legend.title      = element_text(size = 18)
+    )
+  
+  dat <- df_in %>%
+    filter(fov == fov_in)
+  
+  res <- dat %>%
+    arrange(!!sym(color)) %>%
+    ggplot(aes(!!sym(x), -(!!sym(y)), fill = !!sym(color) + pseudo)) +
+    geom_point_trace(
+      size = 1,
+      stroke = 0.5,
+      ...
+    ) +
+    scale_fill_gradientn(colours = clrs, trans = trans) +
+    guides(fill = guide_colorbar(ticks = FALSE, title = ttl)) +
+    coord_fixed() +
+    plt_theme
+  
+  res
+}
+
+# Fraction of cells within each cell type that belong to a certain class
+# e.g. Ag+ or CHIKV+
+.create_class_figure <- function(bar_dat, plot_dat, class_clmn, class,
+                                 celltype_clmn, clrs, top_types = NULL,
+                                 n_cells = 30, nrow = 3,
+                                 rel_heights = rep(1, nrow), y_ttl = NULL,
+                                 alph = c("1" = 1, "2" = 0.75, "3" = 0.5, "4" = 0.25)) {
+  
+  # FOVs to plot
+  fovs_to_plot <- levels(bar_dat$fov) %||% unique(bar_dar$fov)
+  
+  y_ttl <- y_ttl %||% str_c("% ", class, " cells")
+  
+  # Set column to color cells by
+  # based on cell class, e.g. Ag-low/-high
+  other_class <- unique(bar_dat[[class_clmn]])
+  other_class <- other_class[other_class != class]
+  other_class <- str_c(other_class, collapse = "/")
+  
+  bar_dat <- bar_dat %>%
+    mutate(
+      color_clmn = ifelse(
+        !!sym(class_clmn) == class,
+        !!sym(celltype_clmn),
+        other_class
+      )
+    )
+  
+  # Format data for bargraphs
+  # Do not plot cell types with very few cells
+  ag_dat <- bar_dat %>%
+    group_by(sample, !!sym(celltype_clmn)) %>%
+    filter(n() > n_cells) %>%
+    
+    group_by(sample, rep, !!sym(celltype_clmn)) %>%
+    summarize(
+      n       = n(),
+      frac    = sum(!!sym(class_clmn) == class) / n,
+      .groups = "drop"
+    ) %>%
+    mutate(
+      !!sym(celltype_clmn) := fct_reorder(
+        !!sym(celltype_clmn), frac,
+        .fun = mean,
+        .desc = TRUE
+      )
+    )
+  
+  # Create bargraphs
+  ag_brs <- ag_dat %>%
+    ggplot(aes(
+      !!sym(celltype_clmn), frac,
+      fill  = !!sym(celltype_clmn),
+      alpha = as.character(rep)
+    )) +
+    geom_col(position = position_dodge()) +
+    facet_wrap(~ sample, ncol = 1, strip.position = "right") +
+    scale_alpha_manual(values = alph) +
+    scale_fill_manual(values = clrs) +
+    scale_y_continuous(labels = label_percent(), breaks = pretty_breaks(n = 2)) +
+    labs(y = y_ttl) +
+    base_theme +
+    theme(
+      aspect.ratio    = 0.3,
+      legend.position = "none",
+      strip.placement = "outside",
+      strip.clip      = "off",
+      strip.text      = element_text(size = txt_pt2),
+      axis.title.x    = element_blank(),
+      axis.text.x     = element_text(angle = 45, hjust = 1, size = ttl_pt2),
+      axis.title.y    = element_text(size = ttl_pt2),
+      axis.text.y     = element_text(size = txt_pt1)
+    )
+  
+  # Set column to color cells by
+  # based on cell class, e.g. Ag-low/-high
+  plot_dat <- plot_dat@meta.data %>%
+    mutate(
+      color_clmn = ifelse(
+        !!sym(class_clmn) == class,
+        as.character(!!sym(celltype_clmn)),
+        other_class
+      ),
+      color_clmn = fct_relevel(color_clmn, levels(ag_dat[[celltype_clmn]])),
+      color_clmn = fct_relevel(color_clmn, names(clrs)[!grepl("^other", names(clrs))]),
+      color_clmn = fct_relevel(color_clmn, top_types),
+      color_clmn = fct_rev(color_clmn)
+    ) %>%
+    arrange(color_clmn)
+  
+  # Set plot labels
+  ag_labs <- bar_dat %>%
+    group_by(color_clmn) %>%
+    summarize(n = n(), .groups = "drop") %>%
+    mutate(
+      n_lab = str_c(color_clmn, "\nn = ", label_comma()(n))
+    ) %>%
+    arrange(color_clmn)
+  
+  ag_labs <- set_names(ag_labs$n_lab, ag_labs$color_clmn)
+  
+  # Plot tissue sections
+  all_typs <- levels(plot_dat$color_clmn)
+  
+  plts <- fovs_to_plot %>%
+    map(~ {
+      dat <- plot_dat %>%
+        filter(fov == .x)
+      
+      p <- dat %>%
+        ggplot(aes(x_cell, -y_cell, color = color_clmn)) +
+        geom_point(size = 0.25, show.legend = TRUE) +
+        guides(color = guide_legend(override.aes = list(shape = 15, size = 4), reverse = TRUE)) +
+        scale_color_manual(values = clrs, labels = ag_labs, drop = FALSE) +
+        labs(tag = fov_lvls[.x]) +
+        coord_fixed() +
+        umap_theme +
+        theme(
+          legend.position   = "bottom",
+          legend.key.height = unit(35, "pt"),
+          legend.title      = element_blank(),
+          plot.tag.position = c(0.05, 0.95),
+          plot.tag          = element_text(size = ttl_pt2, hjust = 0)
+        )
+      p
+    })
+  
+  # Create final figure
+  fig <- plts %>%
+    wrap_plots(
+      nrow    = nrow,
+      heights = rel_heights,
+      guides  = "collect"
+    ) &
+    theme(
+      legend.position = "bottom",
+      legend.text     = element_text(size = ttl_pt2)
+    )
+  
+  fig <- plot_grid(
+    fig, ag_brs,
+    nrow = 1,
+    rel_widths = c(1, 0.45)
+  )
+  
+  fig
+}
+
+.process_xenium <- function(obj, dims = 1:40, resolution = c(1, 3, 5, 10)) {
+  
+  res <- obj %>%
+    SCTransform(assay = "Xenium") %>%
+    RunPCA(
+      assay    = "SCT",
+      npcs     = 50,
+      features = rownames(.)
+    ) %>%
+    RunUMAP(
+      assay     = "SCT",
+      reduction = "pca",
+      dims      = dims
+    )
+  
+  res <- res %>%
+    FindNeighbors(
+      assay     = "SCT",
+      reduction = "pca",
+      dims      = dims
+    ) %>%
+    FindClusters(resolution = resolution)
+  
+  u_coords <- res %>%
+    FetchData(c("umap_1", "umap_2"))
+
+  res <- res %>%
+    AddMetaData(u_coords)
+  
+  res
+}
+
+plot_xenium <- function(df_in, dat_clmn, grp_clmn = NULL, clrs = NULL,
+                        lvls = NULL,
+                        x = "x_cell", y = "y_cell", ttl = NULL,
+                        pt_size = 0.35, outline = TRUE,
+                        trans = "identity", show_scale = TRUE, scale_len = 300,
+                        scale_linewidth = 1,
+                        scale_unit = "\u03BCm", scale_lab_pad = 0.05,
+                        scale_lab_size = 8, ...) {
+  
+  is_num <- !is.null(dat_clmn) && is.numeric(df_in[[dat_clmn]])
+  
+  if (is_num && length(clrs) == 1) clrs <- c("white", clrs)
+  
+  # Create UMAPs
+  res <- df_in %>%
+    plot_scatter(
+      dat_clmn,
+      x            = x,
+      y            = y,
+      group_col    = grp_clmn,
+      size         = pt_size,
+      stroke       = 0.75,
+      outline      = outline,
+      plot_colors  = clrs,
+      plot_lvls    = lvls %||% names(clrs),
+      trans        = trans,
+      label_params = list(size = 14),
+      ...
+    ) +
+    scale_y_reverse() +
+    coord_fixed() +
+    umap_theme_2 +
+    theme(
+      legend.position = "bottom",
+      legend.text     = element_text(size = ttl_pt2),
+      strip.text      = element_text(size = ttl_pt2)
+    )
+  
+  if (is_num) {
+    res <- res +
+      guides(fill = guide_colorbar(
+        title.position = "top",
+        title          = ttl,
+        ticks          = FALSE
+      )) +
+      theme(
+        legend.key.width  = unit(35, "pt"),
+        legend.key.height = unit(7, "pt"),
+        legend.title      = element_text(size = ttl_pt2, hjust = 0.5)
+      )
+    
+  } else if (!is.null(dat_clmn)) {
+    res <- res +
+      guides(fill = guide_legend(
+        nrow           = 2,
+        title.position = "top",
+        title          = ttl,
+        override.aes   = list(size = 4, color = "black"),
+        reverse        = TRUE
+      )) +
+      theme(
+        legend.key.height = unit(35, "pt"),
+        legend.title      = element_blank()
+      )
+  }
+
+  # Add scale bar
+  scale_dat <- df_in %>%
+    summarize(
+      x    := min(!!sym(x)),
+      ymax := max(!!sym(y)),
+      y    := min(!!sym(y)),
+      xend  = x + scale_len,
+      yend  = y
+    ) %>%
+    mutate(
+      xlab      = median(c(x, xend)),
+      ylab      = abs(diff(c(ymax, y))),
+      ylab      = y + (ylab * scale_lab_pad),
+      scale_lab = str_c(c(as.character(scale_len), scale_unit), collapse = " ")
+    )
+  
+  if (show_scale) {
+    res <- res +
+      geom_segment(
+        aes(x = x, xend = xend, y = y, yend = yend, fill = NULL, color = NULL),
+        data = scale_dat,
+        linewidth = scale_linewidth
+      ) +
+      geom_text(
+        aes(xlab, ylab, label = scale_lab, fill = NULL, color = NULL),
+        data  = scale_dat,
+        size  = scale_lab_size / .pt
+      )
+  }
+  
+  res
+}
+```
+
+```{r "{{obj_prfx}} create object", eval = create_sobjs}
+# Identify samples to load
+xen_dirs <- dir(
+  here(data_dir),
+  pattern = data_regex,
+  full.names = TRUE
+)
+
+names(xen_dirs) <- xen_dirs %>%
+  str_extract(sample_regex)
+
+# Create Seurat object
+# * store custom targets as separate assay
+# * filter for >5 features
+xen <- xen_dirs %>%
+  imap(~ {
+    obj <- .x %>%
+      LoadXenium(fov = .y) %>%
+      subset(nFeature_Xenium > 5)
+
+    gns <- rownames(obj)
+    gns <- gns[!gns %in% custom_targets]
+
+    cstm <- obj %>%
+      subset(features = custom_targets)
+
+    obj <- obj %>%
+      subset(features = gns)
+
+    obj[["Xenium_custom"]] <- cstm@assays$Xenium
+    
+    obj
+  })
+```
+
+```{r "{{obj_prfx}} process object", include = FALSE, eval = create_sobjs}
+# Process data
+xen <- xen %>%
+  imap(~ {
+    .x %>%
+      mutate_meta(mutate, fov = .y) %>%
+      .process_xenium(
+        dims = 1:40,
+        resolution = xen_clst_rsln
+      )
+  })
+```
+
+```{r "{{obj_prfx}} cell type reference", eval = create_sobjs}
+# Create reference using scRNA-seq data
+# Run SCTransform separately, merge, PrepSCTFindMarkers to correct sequencing
+#   depth between samples
+# * Reference object can only have a single SCT model, so use one mock sample
+ref_file <- here(obj_dir, str_c(obj_prfx, "_ref.qs"))
+
+if (!file.exists(ref_file)) {
+  ref_so <- here(ref_obj) %>%
+    qread() %>%
+    DietSeurat(
+      assays    = "RNA",
+      layers    = "counts",
+      dimreducs = NULL,
+      graphs    = NULL
+    )
+  
+  ref_so <- ref_so %>%
+    subset(treatment == "mock")
+  
+  top_sample <- ref_so$orig.ident %>%
+    table() %>%
+    sort(decreasing = TRUE) %>%
+    head(1) %>%
+    names()
+  
+  ref_so <- ref_so %>%
+    subset(orig.ident == top_sample) %>%
+    SCTransform()
+  
+  # Filter object to reduce memory requirement
+  ref_so <- ref_so %>%
+    DietSeurat(assays = c("SCT", "RNA"))
+  
+  ref_so %>%
+    qsave(ref_file)
+  
+} else {
+  ref_so <- qread(ref_file)
+}
+```
+
+```{r "{{obj_prfx}} cell type annotations", eval = create_sobjs}
+# Identify transfer anchors
+anchors <- xen %>%
+  map(~ {
+    FindTransferAnchors(
+      ref_so,
+      query = .x,
+      query.assay = "SCT",
+      normalization.method = "SCT"
+    )
+  })
+
+preds <- xen %>%
+  imap(~ {
+    TransferData(
+      anchorset        = anchors[[.y]],
+      refdata          = ref_so$cell_type,
+      prediction.assay = TRUE,
+      weight.reduction = .x[["pca"]],
+      dims             = 1:40
+    )
+  })
+
+anchors %>%
+  qsave(here(obj_dir, str_c(obj_prfx, "_anchors.qs")))
+
+preds %>%
+  qsave(here(obj_dir, str_c(obj_prfx, "_preds.qs")))
+
+# Predict cell types for Xenium data
+xen <- xen %>%
+  imap(~ {
+    .x[["preds"]] <- preds[[.y]]
+    
+    xen_types <- .x@assays$preds@data %>%
+      as_tibble(rownames = "cell_type") %>%
+      pivot_longer(-cell_type, values_to = "pred_conf") %>%
+      filter(cell_type != "max") %>%
+      group_by(name) %>%
+      filter(pred_conf == max(pred_conf)) %>%
+      mutate(cell_type = if_else(n() > 1, "unassigned", cell_type)) %>%
+      ungroup() %>%
+      column_to_rownames("name")
+    
+    .x %>%
+      AddMetaData(xen_types)
+  })
+
+# Merge objects
+xen <- merge(xen[[1]], xen[-1], add.cell.ids = names(xen))
+
+rm(ref_so)
+gc()
+```
+
+```{r "{{obj_prfx}} save objects", eval = create_sobjs}
+# Identify cells positive for key targets
+if (!is.null(key_targets)) {
+  key_feats <- str_c("xeniumcustom_", key_targets)
+  
+  xen <- xen %>%
+    AddMetaData(
+      FetchData(., key_feats, slot = "counts"),
+      col.name = names(key_targets)
+    ) %>%
+    mutate_meta(~ {
+      .x %>%
+        rowwise() %>%
+        mutate(
+          cell_class = if_else(
+            any(c(!!!syms(names(key_targets))) > 0),
+            "high", "low"
+          )
+        ) %>%
+        ungroup()
+    })
+}
+
+# Format meta.data
+xen <- xen %>%
+  mutate_meta(
+    mutate,
+    sample     = sample_names[as.character(fov)],
+    class_type = ifelse(cell_class == "high", cell_type, "low")
+  )
+          
+if (str_length(sample_delim) > 0 && all(str_detect(sample_names, sample_delim))) {
+  xen <- xen %>%
+    mutate_meta(
+      separate_wider_delim,
+      sample,
+      delim = sample_delim,
+      names = c("treatment", "rep"),
+      cols_remove = FALSE
+    )
+}
+
+# Add cell coordinates
+fovs <- names(xen@images)
+
+cell_coords <- fovs %>%
+  map(~ {
+    bcs <- xen@meta.data %>%
+      filter(fov == str_replace_all(.x, fixed("."), "-")) %>%
+      rownames()
+    
+    coords <- as.data.frame(
+      xen@images[[.x]]@boundaries$centroids@coords,
+      row.names = bcs
+    )
+    
+    colnames(coords) <- str_c(colnames(coords), "_cell")
+    
+    coords
+  }) %>%
+  bind_rows()
+
+xen <- xen %>%
+  AddMetaData(cell_coords)
+
+# Select subset of cells to plot
+# * too many points to plot, downsample when plotting sections
+set.seed(42)
+
+plt_cells <- sample(colnames(xen), 50000)
+
+plt_cells <- xen@meta.data %>%
+  filter(cell_type %in% top_types | cell_class == "high") %>%
+  rownames() %>%
+  c(plt_cells) %>%
+  unique()
+
+plt_cells <- xen@meta.data[plt_cells, ] %>%
+  mutate(cell_type = fct_relevel(cell_type, top_types)) %>%
+  arrange(cell_type) %>%
+  rownames()
+
+small <- xen %>%
+  subset(cells = plt_cells)
+
+# Save objects
+xen %>%
+  save_objs(
+    prfx   = obj_prfx,
+    ob_dir = obj_dir
+  )
+
+small %>%
+  save_objs(
+    prfx   = str_c(obj_prfx, "_small"),
+    ob_dir = obj_dir
+  )
+```
+
+```{r "{{obj_prfx}} load objects", eval = !create_sobjs}
+xen   <- qread(here(obj_dir, str_c(obj_prfx, ".qs")))
+small <- qread(here(obj_dir, str_c(obj_prfx, "_small.qs")))
+```
