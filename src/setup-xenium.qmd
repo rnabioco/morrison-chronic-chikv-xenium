@@ -33,7 +33,8 @@ top_types      <- "{{top_types}}"
 custom_targets <- here(custom_targets) %>%
   read_csv(col_types = cols_only("c")) %>%
   pull(1) %>%
-  unique()
+  unique() %>%
+  str_replace_all("_", "-")
 
 # Clustering resolution
 xen_clst_rsln <- 10
@@ -494,14 +495,24 @@ if (!file.exists(ref_file)) {
 ```
 
 ```{r "{{obj_prfx}} cell type annotations", eval = create_sobjs}
+# Identify common features to use for finding transfer anchors
+common_gns <- xen %>%
+  map(rownames) %>%
+  unlist(use.names = FALSE) %>%
+  unique()
+
+common_gns <- common_gns[common_gns %in% rownames(ref_so)]
+
 # Identify transfer anchors
 anchors <- xen %>%
   map(~ {
     FindTransferAnchors(
       ref_so,
-      query = .x,
-      query.assay = "SCT",
-      normalization.method = "SCT"
+      query                = .x,
+      query.assay          = "SCT",
+      normalization.method = "SCT",
+      # k.anchor             = 10,
+      features             = common_gns
     )
   })
 
@@ -540,6 +551,10 @@ xen <- xen %>%
     .x %>%
       AddMetaData(xen_types)
   })
+
+# Save unmerged objects
+xen %>%
+  qsave(file.path(obj_dir, str_c(obj_prfx, "_raw.qs")))
 
 # Merge objects
 xen <- merge(xen[[1]], xen[-1], add.cell.ids = names(xen))

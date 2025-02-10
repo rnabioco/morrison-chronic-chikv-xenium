@@ -629,14 +629,23 @@ CHIKV+ cells (>0 total CHIKV counts) are shown for tissue sections.
 
 <br>
 
-High-resolution images show CHIKV counts for each tissue section.
+High-resolution images show CHIKV counts (left) and CHIKV+ cells (right)
+for each tissue section.
 
-```{r, fig.width = 20, fig.height = 10, results = "asis", out.height = "50%"}
+```{r, fig.width = 45, fig.height = 10, results = "asis", out.height = "70%"}
 fovs %>%
   walk(~ {
     cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
     
-    fig <- xen_dat %>%
+    plt <- xen_dat %>%
+      .plot_full_fov(
+        fov   = .x,
+        color = "class_type",
+        clrs  = typ_clrs,
+        trace = "NONE"
+      )
+    
+    sig <- xen_dat %>%
       .plot_full_fov_signal(
         fov    = .x,
         color  = "nCount_key_feats",
@@ -646,6 +655,13 @@ fovs %>%
         trans  = "log10"
       )
     
+    fig <- plot_grid(
+      sig, plt,
+      nrow  = 1,
+      align = "h",
+      axis  = "tb" 
+    )
+      
     print(fig)
     cat("\n\n")
   })
@@ -787,7 +803,7 @@ dat <- xen_dat %>%
     frac_pos = n_pos / n,
     across(
       c(n, n_pos),
-      ~ if_else(.x >= 1000, str_c(round(n / 1000, 1), "k"), as.character(.x))
+      ~ if_else(.x >= 1000, str_c(round(.x / 1000, 1), "k"), as.character(.x))
     ),
     n_lab     = str_c(n_pos, "/", n),
     name      = fct_relevel(name, key_feats),
@@ -813,6 +829,97 @@ dat %>%
     axis.title.x    = element_blank()
   )
 
+```
+
+```{r "CHIKV+ bargraphs DATA CLUB", fig.width = 10, fig.height = 4, out.width = "70%", eval = FALSE}
+frac_clmns <- str_c("frac_", key_feats)
+
+dat <- xen_dat %>%
+  filter(treatment == "CHIKV") %>%
+  group_by(cell_type) %>%
+  summarize(
+    n = n(),
+    n_pos = sum(cell_class == "high"),
+    .groups = "drop"
+  ) %>%
+  
+  # filter(n_pos > 50) %>%
+  
+  mutate(
+    frac_pos = n_pos / n,
+    across(
+      c(n, n_pos),
+      ~ if_else(.x >= 1000, str_c(round(.x / 1000, 1), "k"), as.character(.x))
+    ),
+    n_lab     = str_c(n_pos, "/", n),
+    cell_type = fct_reorder(cell_type, frac_pos, .desc = TRUE)
+  )
+  
+# Create bargraphs
+brs <- dat %>%
+  ggplot(aes(cell_type, frac_pos, fill = cell_type)) +
+  geom_col() +
+  geom_text(
+    aes(label = n_lab, fill = NULL),
+    angle = 90, hjust = 0
+  ) +
+  scale_fill_manual(values = typ_clrs) +
+  scale_y_continuous(expand = expansion(c(0.05, 0.25)), labels = label_percent()) +
+  labs(y = "% CHIKV+ cells") +
+  base_theme +
+  theme(
+    legend.position = "none",
+    axis.text.x     = element_text(angle = 45, hjust = 1),
+    axis.title.x    = element_blank()
+  )
+
+# Create boxplots
+bxs <- xen_dat %>%
+  filter(
+    treatment == "CHIKV",
+    cell_class == "high"
+  ) %>%
+  group_by(cell_type) %>%
+  filter(n_distinct(.cell_id) > 50) %>%
+  ungroup() %>%
+  mutate(
+    # cell_type = fct_relevel(cell_type, levels(dat$cell_type)),
+    cell_type = fct_reorder(cell_type, frac_key_feats, median, .desc = TRUE)
+  ) %>%
+  ggplot(aes(cell_type, frac_key_feats, fill = cell_type)) +
+  geom_boxplot(outlier.size = 0.1, outlier.alpha = 1) +
+  
+  # facet_wrap(~ rep) +
+  
+  scale_fill_manual(values = typ_clrs) +
+  scale_y_continuous(trans = "log10", labels = label_percent()) +
+  labs(y = "% CHIKV counts") +
+  base_theme +
+  theme(
+    legend.position = "none",
+    axis.text.x     = element_text(angle = 45, hjust = 1),
+    axis.title.x    = element_blank()
+  )
+
+# Save final figure
+plt <- plot_grid(
+  brs, NULL, bxs,
+  nrow  = 1,
+  align = "h",
+  axis  = "tb",
+  rel_widths = c(1, 0.2, 1)
+)
+
+ggsave(
+  "chikv_quant.png",
+  path   = file.path("~/Dropbox/Ryan/Documents/Hesselberth_lab/Meetings/2025-01-28_data_club"),
+  plot   = plt,
+  device = "png",
+  bg     = "white", 
+  width  = 10,
+  height = 4,
+  dpi    = 600,
+)
 ```
 
 <br>
