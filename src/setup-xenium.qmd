@@ -452,6 +452,21 @@ xen <- xen %>%
   })
 ```
 
+```{r "{{obj_prfx}} AZIMUTH TEST", eval = FALSE}
+ref <- ref_so %>%
+  RunPCA() %>%
+  RunUMAP(dims = 1:40, return.model = TRUE)
+
+ref %>%
+  AzimuthReference(
+    refUMAP  = "umap",
+    refDR    = "pca",
+    refAssay = "SCT",
+    dims     = 1:40,
+    metadata = "cell_type"
+  )
+```
+
 ```{r "{{obj_prfx}} cell type reference", eval = create_sobjs}
 # Create reference using scRNA-seq data
 # Run SCTransform separately, merge, PrepSCTFindMarkers to correct sequencing
@@ -511,7 +526,7 @@ anchors <- xen %>%
       query                = .x,
       query.assay          = "SCT",
       normalization.method = "SCT",
-      # k.anchor             = 10,
+      k.anchor             = 20,
       features             = common_gns
     )
   })
@@ -537,26 +552,25 @@ preds %>%
 xen <- xen %>%
   imap(~ {
     .x[["preds"]] <- preds[[.y]]
-    
+
     xen_types <- .x@assays$preds@data %>%
       as_tibble(rownames = "cell_type") %>%
       pivot_longer(-cell_type, values_to = "pred_conf") %>%
       filter(cell_type != "max") %>%
       group_by(name) %>%
       filter(pred_conf == max(pred_conf)) %>%
-      mutate(cell_type = if_else(n() > 1, "unassigned", cell_type)) %>%
+      summarize(cell_type = ifelse(n() > 1, "unassigned", cell_type)) %>%
       ungroup() %>%
       column_to_rownames("name")
-    
+
     .x %>%
       AddMetaData(xen_types)
   })
 
-# Save unmerged objects
+# Merge objects
 xen %>%
   qsave(file.path(obj_dir, str_c(obj_prfx, "_raw.qs")))
 
-# Merge objects
 xen <- merge(xen[[1]], xen[-1], add.cell.ids = names(xen))
 
 rm(ref_so)

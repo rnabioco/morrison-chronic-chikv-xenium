@@ -13,7 +13,7 @@ output:
 params:
   template_dir: "src"                     # Directory for Rmd templates
   ref_dir:      "ref"
-  table_dir:    "results/tables/2024-03-29"          # Directory to write tables
+  table_dir:    "results/tables"          # Directory to write tables
   overwrite:    false                     # Should tables be overwritten if they already exist?
   so_dir:       "~/Dropbox/Ryan/Projects/morrison-chronic-chikv/results/sobjs/2024-01-22_4" # Directory for Seurat objects
   treatment_levels: ["mock", "CHIKV"]  # order as control, treatment, order affects how marker genes are identified
@@ -488,8 +488,6 @@ fovs %>%
   })
 ```
 
-###
-
 ### Annotation confidence
 
 The per-cell prediction confidence for cell type annotations is shown below.
@@ -604,7 +602,37 @@ plts %>%
   })
 ```
 
-###
+### Cell type markers
+
+```{r "DEGS TEST", eval = FALSE}
+Idents(xen) <- xen$cell_type
+
+xen <- xen %>%
+  PrepSCTFindMarkers(assay = "SCT")
+
+degs <- typs %>%
+  map_dfr(~ {
+    xen %>%
+      FindConservedMarkers(
+        assay        = "SCT",
+        ident.1      = .x,
+        grouping.var = "sample",
+        only.pos     = TRUE
+      ) %>%
+      mutate(cell_type = .x, .before = 1)
+  }) %>%
+  as_tibble(rownames = "gene")
+
+degs %>%
+  write_tsv(here(params$table_dir, "cell_type_markers.tsv.gz"))
+
+# top_degs <- degs %>%
+#   filter(max_pval < 0.05)
+# 
+# top_degs %>%
+#   filter(cell_type == "B cells") %>%
+#   rownames()
+```
 
 ## CHIKV infection
 
