@@ -1916,9 +1916,12 @@ create_boxes <- function(df_in, x, y, fill = x, plot_clrs = NULL, type = "boxplo
 #' @param ... Additional arguments to adjust boxplot theme.
 #' @return ggplot object
 #' @export
-create_feat_boxes <- function(sobj_in, feats, grp_column = "subtype", box_colors = NULL,
-                              median_pt = 1, panels_n_row = 4, panels_n_col = 10, plot_vln = FALSE,
-                              show_x_labels = FALSE, plot_theme = base_theme, ...) {
+create_feat_boxes <- function(sobj_in, feats, grp_column = "subtype",
+                              box_colors = NULL, median_pt = 1,
+                              panels_n_row = 4, panels_n_col = 10,
+                              plot_vln = FALSE, show_x_labels = FALSE,
+                              plot_theme = base_theme, highlight_grp = NULL,
+                              y_ttl = "log normalized counts", ...) {
   
   # Check for empty inputs
   if (is_empty(feats)) {
@@ -2037,11 +2040,25 @@ create_feat_boxes <- function(sobj_in, feats, grp_column = "subtype", box_colors
       show.legend = FALSE
     ) +
     guides(fill = legd_gd(nrow = 3, shape = 22)) +
-    labs(y = "log normalized counts") +
+    labs(y = y_ttl) +
     theme(
-      panel.background = element_rect(fill = fade_0),
+      panel.background = element_rect(fill = "white"),
       strip.text       = element_text(size = txt_pt2)
     )
+  
+  # Highlight specified group
+  if (!is.null(highlight_grp)) {
+    res <- res +
+      geom_point(
+        aes(y = Inf, fill = NULL),
+        data   = ~ filter(.x, !!sym(grp_column) == highlight_grp),
+        position = position_nudge(y = -0.1),
+        color    = "black",
+        size     = 3,
+        shape    = 25,
+        stroke   = 0.5
+      )
+  }
   
   # Fix plot rows
   n_feats  <- length(feats)
@@ -2883,33 +2900,41 @@ find_markers <- function(sobj_in, grp_column = NULL, exclude_grp = NULL,
 #' 
 #' @param sobj_in Seurat object.
 #' @param ident_1 Identity class to define markers for.
-#' @param idnet_2 Second identity class for comparison. If NULL use all other
-#' cells for comparison.
+#' If NULL, markers will be identified for separately for each identity set for
+#' the object
+#' (`Idents()`).
+#' @param ident_2 Second identity class for comparison.
+#' If NULL use all other cells for comparison.
 #' @param rep_var Variable containing replicate IDs to use for grouping cells,
 #' e.g. 'rep'
 #' @param group_var Variable to use for splitting cells when finding markers,
 #' FindConservedMarkers() will be run separately for each variable in group_var.
+#' @param assay Assay to use for identifying markers.
+#' If NULL, the default assay set for the object will be used.
 #' @param p_max Maximum p-value to consider a gene significant
 #' @param fc_min Minimum absolute log2 fold change, this overrides the
 #' fc_range argument.
 #' @param fc_range Vector of length 2 containing minimum and maximum log2 fold
-#' change for markers. Use this argument to select positive or negative
-#' markers.
+#' change for markers.
+#' Use this argument to select positive or negative markers.
 #' @param p_adj_method Method to use for adjusting p-values, by default Seurat
 #' uses bonferroni correction.
 #' @param n_reps The number of biological replicates that need to conform to the
 #' provided filtering cutoffs for the gene to be considered significant.
+#' If NULL, all replicates must pass filtering cutoffs.
 #' @param filter_sig Filter genes to only return significant ones based on
 #' provided cutoffs.
 #' @param filter_regex Remove genes from results that match the provided regular
 #' expression
 #' @param file_path File path to write results.
 #' @param overwrite Overwrite existing file specified by file_path.
+#' @param n_threads Number of threads to use for parallel processing.
 #' @return tibble containing marker genes.
 #' @export
 find_conserved_markers <- function(sobj_in, ident_1 = NULL, ident_2 = NULL,
-                                   rep_var, group_var = NULL, p_max = 0.05,
-                                   fc_min = 0.25, fc_range = c(-Inf, Inf),
+                                   rep_var, group_var = NULL, assay = "RNA",
+                                   p_max = 0.05, fc_min = 0.25,
+                                   fc_range = c(-Inf, Inf),
                                    p_adj_method = "bonferroni",
                                    n_reps = NULL, filter_sig = FALSE,
                                    filter_regex = NULL,
@@ -2917,30 +2942,42 @@ find_conserved_markers <- function(sobj_in, ident_1 = NULL, ident_2 = NULL,
                                    n_threads = 6) {
   
   if (is.null(ident_1) && !is.null(ident_2)) {
-    stop("Must specify ident_1 when ident_2 is given.")
+    cli_abort("Must specify `ident_1` when `ident_2` is given")
   }
   
   if (!is.null(file_path) && file.exists(file_path) && !overwrite) {
-    warning("Loading existing file: ", file_path, ". Set overwrite = TRUE to rerun.")
+    cli_warn(c(
+      "!" = "Loading existing file: {.path {file_path}}",
+      "!" = "Set `overwrite = TRUE` to rerun"
+    ))
     
-    return(read_tsv(file_path))
+    return(read_tsv(file_path, show_col_types = FALSE, progress = FALSE))
   }
   
   if (length(fc_range) != 2) {
-    stop("fc_range must be a vector of length 2")
+    cli_abort("`fc_range` must be a vector of length 2")
   }
   
   if (!fc_range[1] < fc_range[2]) {
-    stop("The first value of fc_range must be smaller than the second value")
+    cli_abort("The first value of fc_range must be smaller than the second value")
   }
   
   if (is.null(ident_1)) {
     ident_1 <- unique(Idents(sobj_in))
   }
   
+  if (is.null(assay)) {
+    cli_warn(
+      "No assay specified, using the default assay, \"{DefaultAssay(sobj_in)}\""
+    )
+    
+    assay <- DefaultAssay(sobj_in)
+  }
+  
   # Set FC filtering parameters
   # only pass filtering parameters if returning a filtered table
-  tot_n_reps <- n_distinct(sobj_in[[rep_var, drop = TRUE]])
+  reps       <- sort(unique(sobj_in[[rep_var, drop = TRUE]]))
+  tot_n_reps <- length(reps)
   n_reps     <- n_reps %||% tot_n_reps
   only_pos   <- FALSE
   fc_lim     <- 0
@@ -2963,6 +3000,7 @@ find_conserved_markers <- function(sobj_in, ident_1 = NULL, ident_2 = NULL,
     
     res <- so_in %>%
       FindConservedMarkers(
+        assay           = assay,
         ident.1         = ident_1,
         ident.2         = ident_2,
         grouping.var    = rep_var,
@@ -2977,9 +3015,8 @@ find_conserved_markers <- function(sobj_in, ident_1 = NULL, ident_2 = NULL,
     if (nrow(res) > 0) {
       n_gns <- nrow(so_in)
       
-      fc <- syms(grep("_avg_log2FC$", colnames(res), value = TRUE))
-      
-      p     <- grep("^[0-9]+_p_val$", colnames(res), value = TRUE)
+      fc    <- syms(str_c(reps, "_avg_log2FC"))
+      p     <- str_c(reps, "_p_val")
       p_adj <- str_c(p, "_adj")
       p     <- set_names(p, p_adj)
       p_adj <- syms(p_adj)
@@ -3083,16 +3120,14 @@ find_conserved_markers <- function(sobj_in, ident_1 = NULL, ident_2 = NULL,
           mutate(!!sym(group_var) := .x, .before = ident_1)
       }, .options = furrr_options(seed = TRUE))
     
-    future::plan("sequential")
-    
   } else {
     .plan_future(ident_1, n_threads)
     
     res <- ident_1 %>%
       map_dfr(~ .find_conserved_markers(sobj_in, .x))
-    
-    future::plan("sequential")
   }
+  
+  future::plan("sequential")
   
   # Remove genes that match filt_regex
   if (!is.null(filter_regex)) {
@@ -3102,7 +3137,15 @@ find_conserved_markers <- function(sobj_in, ident_1 = NULL, ident_2 = NULL,
   
   # Write table
   if (!is.null(file_path) && nrow(res) > 0) {
-    write_tsv(res, file_path)
+    write_tsv(res, file_path, progress = FALSE)
+    
+    cli_alert_info("Saving file: {.path {file_path}}")
+  }
+  
+  if (nrow(res) == 0) {
+    cli_warn(
+      "No differentially expressed genes identified, consider relaxing filtering cutoffs."
+    )
   }
   
   res

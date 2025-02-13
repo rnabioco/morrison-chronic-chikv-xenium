@@ -501,6 +501,7 @@ dat <- xen@meta.data %>%
 
 dat %>%
   ggplot(aes(cell_type, pred_conf, fill = cell_type)) +
+  geom_hline(yintercept = 0.5, linetype = 2, linewidth = 0.5) +
   geom_boxplot(outlier.size = 0.2) +
   facet_wrap(~ sample) +
   scale_fill_manual(values = typ_clrs) +
@@ -517,7 +518,7 @@ dat %>%
 
 ### {.tabset .tabset-pills}
 
-Expression of marker genes is shown below.
+Expression of select marker genes is shown below.
 The % of cells expressing each gene is shown above each boxplot.
 
 ```{r "cell type markers"}
@@ -598,40 +599,85 @@ plts %>%
   iwalk(~ {
     cat("\n\n####", .y, "\n\n")
     print(.x)
-    cat("\n\n---\n\n<br>\n\n<br>\n\n")
+    cat("\n\n<br>\n\n<br>\n\n")
   })
 ```
 
-### Cell type markers
+### Cell type markers {.tabset .tabset-pills}
 
-```{r "DEGS TEST", eval = FALSE}
-Idents(xen) <- xen$cell_type
+The top 40 marker genes identified for each cell type are shown below for
+cells from mock-infected samples.
+Differentially expressed genes were filtered to only include upregulated genes
+with a minimum adjusted p value <0.05.
+Arrows indicate the cell type used to identify each set of markers.
 
+```{r "identify degs"}
+# Prepare object
 xen <- xen %>%
   PrepSCTFindMarkers(assay = "SCT")
 
-degs <- typs %>%
-  map_dfr(~ {
-    xen %>%
-      FindConservedMarkers(
-        assay        = "SCT",
-        ident.1      = .x,
-        grouping.var = "sample",
-        only.pos     = TRUE
-      ) %>%
-      mutate(cell_type = .x, .before = 1)
-  }) %>%
-  as_tibble(rownames = "gene")
+Idents(xen) <- xen$cell_type
 
-degs %>%
-  write_tsv(here(params$table_dir, "cell_type_markers.tsv.gz"))
+# Identify DEGs
+degs <- xen %>%
+  find_conserved_markers(
+    assay        = "SCT",
+    rep_var      = "sample",
+    fc_min       = NULL,
+    fc_range     = c(0, Inf),
+    p_adj_method = "BH",
+    file_path    = here(params$table_dir, "cell_type_markers.tsv.gz") 
+  )
 
-# top_degs <- degs %>%
-#   filter(max_pval < 0.05)
-# 
-# top_degs %>%
-#   filter(cell_type == "B cells") %>%
-#   rownames()
+# Filter DEGs
+pct_clmns <- syms(str_c(sam_lvls, "_pct.1"))
+
+top_degs <- degs %>%
+  filter(
+    all_same_direction,
+    direction == "up",
+    min_p_adj < 0.05
+  ) %>%
+  rowwise() %>%
+  mutate(min_pct_1 = min(!!!pct_clmns)) %>%
+  ungroup()
+```
+
+```{r "cell type marker plots", fig.width = 15, fig.height = 8, results = "asis"}
+lvls <- top_degs %>%
+  group_by(ident_1) %>%
+  summarize(n = n(), .groups = "drop") %>%
+  arrange(desc(n)) %>%
+  pull(ident_1)
+
+marks <- top_degs %>%
+  arrange(desc(min_pct_1), max_p_adj, min_p_adj) %>%
+  group_by(ident_1) %>%
+  slice(1:40) %>%
+  split(.$ident_1) %>%
+  map(pull, gene)
+
+marks <- marks[lvls]
+
+dat <- xen %>%
+  subset(treatment == "mock")
+
+marks %>%
+  iwalk(~ {
+    cat("\n\n####", .y, "\n\n")
+    
+    plt <- dat %>%
+      create_feat_boxes(
+        grp_column    = "cell_type",
+        feats         = .x,
+        box_colors    = typ_clrs,
+        highlight_grp = .y,
+        y_ttl         = "normalized expression"
+      )
+    
+    print(plt)
+    cat("\n\n---\n\n<br>\n\n<br>\n\n")
+  })
 ```
 
 ## CHIKV infection
@@ -1027,6 +1073,68 @@ wrap_plots(
   guides = "collect",
   nrow = 1
 )
+```
+
+<br>
+
+The fraction of CHIKV+ cells with detectable sgRNA, 5' (nsP genes), and
+negative strand signal is shown for each sample.
+The CHIKV+ class indicates which probes were detectable within the cell, e.g.,
+"sgRNA/5'/neg" had signal for all three regions and "sgRNA" only had
+signal for sgRNA probes.
+Only cell types with >100 total CHIKV+ cells are shown.
+
+```{r "CHIKV SIGNAL GROUPS", fig.width = 10, fig.height = 5, out.width = "70%"}
+# Set CHIKV groups
+xen_dat <- xen_dat %>%
+  mutate(
+    chikv_class = case_when(
+      CHIKV_sgRNA > 0 & CHIKV_5 > 0 & CHIKV_neg > 0 ~ "sgRNA/5'/neg",
+      CHIKV_sgRNA > 0 & CHIKV_5 > 0                 ~ "sgRNA/5'",
+      CHIKV_sgRNA > 0                               ~ "sgRNA",
+      CHIKV_5 > 0 & CHIKV_neg > 0                   ~ "5'/neg",
+      CHIKV_5 > 0                                   ~ "5'",
+      CHIKV_neg > 0                                 ~ "neg",
+      cell_class == "low"                           ~ "CHIKV-low",
+      TRUE                                          ~ "other"
+    )
+  )
+
+# Format plot data
+dat <- xen_dat %>%
+  filter(cell_class == "high") %>%
+  mutate(chikv_class = fct_infreq(chikv_class)) %>%
+  group_by(cell_type) %>%
+  filter(n_distinct(.cell_id) > 100) %>%
+  ungroup() %>%
+  mutate(cell_type = fct_infreq(cell_type))
+
+n_dat <- dat %>%
+  group_by(sample, cell_type) %>%
+  summarize(n = n_distinct(.cell_id), .groups = "drop") %>%
+  mutate(
+    n_lab = if_else(n >= 1000, str_c(round(n / 1000, 1), "k"), as.character(n))
+  )
+
+# Create bargraphs
+dat %>%
+  ggplot(aes(sample, fill = chikv_class)) +
+  geom_bar(position = "fill") +
+  geom_text(
+    aes(y = 1, label = n_lab, fill = NULL),
+    data = n_dat,
+    vjust = 0
+  ) +
+  facet_wrap(~ cell_type) +
+  scale_fill_manual(values = clrs) +
+  scale_y_continuous(expand = expansion(c(0.05, 0.15)), breaks = c(0, 0.5, 1)) +
+  labs(y = "fraction of CHIKV+ cells") +
+  guides(fill = guide_legend(title = "CHIKV+ class")) +
+  base_theme +
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x  = element_text(angle = 45, hjust = 1)
+  )
 ```
 
 ---
