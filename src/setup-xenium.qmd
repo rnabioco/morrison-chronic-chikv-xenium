@@ -642,6 +642,14 @@ cell_coords <- fovs %>%
 xen <- xen %>%
   AddMetaData(cell_coords)
 
+# Adjust cell type annotations based on confidence
+# * mark cells with confidence <0.5 as unassigned
+xen <- xen %>%
+  mutate_meta(
+    mutate,
+    cell_type = if_else(pred_conf > 0.5, cell_type, "unassigned")
+  )
+
 # Select subset of cells to plot
 # * too many points to plot, downsample when plotting sections
 set.seed(42)

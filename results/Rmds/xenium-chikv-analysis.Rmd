@@ -1143,6 +1143,86 @@ dat %>%
 
 <br>
 
+## Cell proximity enrichment
+
+```{r "giotto object", eval = FALSE}
+# Load CHIKV samples
+gio_dirs <- dir(
+  here(data_dir),
+  pattern = data_regex,
+  full.names = TRUE
+)
+
+names(gio_dirs) <- gio_dirs %>%
+  str_extract(sample_regex)
+
+nms <- params$xen_sample_names
+nms <- names(nms[grepl("^CHIKV", nms)])
+
+gio_dirs <- gio_dirs[nms]
+
+# Perform cell proximity analysis
+prox_res <- gio_dirs %>%
+  imap(~ {
+    # Create Giotto object
+    # * store custom targets as separate assay
+    meta <- xen_dat %>%
+      filter(fov == .y) %>%
+      select(cell_ID = .cell_id, cell_type, cell_class) %>%
+      mutate(
+        cell_class = recode(cell_class, high = "CHIKV+", low = "CHIKV-"),
+        cell_type  = str_c(cell_type, " (", cell_class, ")"),
+        cell_ID    = str_remove(cell_ID, "^[A-Z]_")
+      ) %>%
+      select(-cell_class) %>%
+      readCellMetadata()
+    
+    obj <- .x %>%
+      createGiottoXeniumObject() %>%
+      setCellMetadata(meta)
+    
+    # Spatial network
+    obj <- obj %>%
+      createSpatialDelaunayNetwork(
+        spat_unit = "cell",
+        feat_type = "rna"
+      )
+    
+    obj %>%
+      qsave(here(str_c("results/gio_s", .y, ".qs")))
+      
+    # Spatial correlation
+    prox <- obj %>%
+      cellProximityEnrichment(
+        spat_unit      = "cell",
+        feat_type      = "rna",
+        cluster_column = "cell_type"
+      )
+    
+    prox %>%
+      qsave(here(str_c("results/prox_s", .y, ".qs")))
+    
+    prox
+  })
+
+# Save proximity enrichment results
+prox_df <- prox_res %>%
+  imap_dfr(~ {
+    .x$enrichm_res %>%
+      as_tibble() %>%
+      mutate(slide = str_c("section ", .y))
+  })
+
+prox_df %>%
+  write_tsv(here("results/prox.tsv.gz"))
+```
+
+---
+
+<br>
+
+<br>
+
 ## Session info
 
 ```{r}

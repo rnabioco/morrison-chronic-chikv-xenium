@@ -35,6 +35,7 @@ library(clustifyr)
 library(clustifyrdata)
 library(scuttle)
 library(DoubletFinder)
+library(Giotto)         # drieslab
 library(M3Drop)
 library(presto)
 library(gprofiler2)
@@ -49,6 +50,4 @@ library(knitr)
 library(cli)
 
 source(here(params$template_dir, "funs.R"))
-```
-
 ```
