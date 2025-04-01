@@ -443,6 +443,125 @@
       ],
       "Hash": "61fac01c73abf03ac72e88dc3952c1e3"
     },
+    "Giotto": {
+      "Package": "Giotto",
+      "Version": "4.2.1",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteUsername": "drieslab",
+      "RemoteRepo": "Giotto",
+      "RemoteRef": "suite",
+      "RemoteSha": "db3fc9d18473f661024ddda8e3229fed46974ba9",
+      "Requirements": [
+        "BiocParallel",
+        "BiocSingular",
+        "GiottoClass",
+        "GiottoUtils",
+        "GiottoVisuals",
+        "Matrix",
+        "MatrixGenerics",
+        "R",
+        "checkmate",
+        "data.table",
+        "dbscan",
+        "ggplot2",
+        "ggraph",
+        "igraph",
+        "methods",
+        "reticulate",
+        "scales",
+        "sparseMatrixStats",
+        "stats",
+        "terra",
+        "uwot"
+      ],
+      "Hash": "d4ae7a3b75465d395c47f10b29d86932"
+    },
+    "GiottoClass": {
+      "Package": "GiottoClass",
+      "Version": "0.4.7",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteUsername": "drieslab",
+      "RemoteRepo": "GiottoClass",
+      "RemoteRef": "main",
+      "RemoteSha": "9f7ef9ee5debfae2b45c8aefe60083f5d93f4623",
+      "Requirements": [
+        "GiottoUtils",
+        "Matrix",
+        "R",
+        "checkmate",
+        "data.table",
+        "dbscan",
+        "deldir",
+        "grDevices",
+        "graphics",
+        "igraph",
+        "matrixStats",
+        "methods",
+        "reticulate",
+        "stats",
+        "terra"
+      ],
+      "Hash": "3a7d022c21025c0613cf3b0d345bced7"
+    },
+    "GiottoUtils": {
+      "Package": "GiottoUtils",
+      "Version": "0.2.4",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteUsername": "drieslab",
+      "RemoteRepo": "GiottoUtils",
+      "RemoteRef": "main",
+      "RemoteSha": "97a72b7d6d88a131e4b02c35f2999c3950c31344",
+      "Requirements": [
+        "R",
+        "R.utils",
+        "checkmate",
+        "data.table",
+        "gtools",
+        "jsonlite",
+        "lifecycle",
+        "magrittr",
+        "methods",
+        "progressr",
+        "stats"
+      ],
+      "Hash": "578b64eced4d17eb99de926e086486d4"
+    },
+    "GiottoVisuals": {
+      "Package": "GiottoVisuals",
+      "Version": "0.2.12",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteUsername": "drieslab",
+      "RemoteRepo": "GiottoVisuals",
+      "RemoteRef": "main",
+      "RemoteSha": "6d3d44a2590f815223a284f25d103a04cd7f2fdc",
+      "Requirements": [
+        "GiottoClass",
+        "GiottoUtils",
+        "R",
+        "checkmate",
+        "colorRamp2",
+        "cowplot",
+        "data.table",
+        "ggplot2",
+        "ggrepel",
+        "igraph",
+        "methods",
+        "plotly",
+        "scales",
+        "scattermore",
+        "stats",
+        "terra"
+      ],
+      "Hash": "56a6ac66ec1d801541a20b9891c0f278"
+    },
     "GlobalOptions": {
       "Package": "GlobalOptions",
       "Version": "0.1.2",
@@ -1659,6 +1778,20 @@
       ],
       "Hash": "61e097f35917d342622f21cdc79c256e"
     },
+    "colorRamp2": {
+      "Package": "colorRamp2",
+      "Version": "0.1.0",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "colorspace",
+        "grDevices",
+        "methods",
+        "stats"
+      ],
+      "Hash": "9d3ab31de2c98399da370982a23733b6"
+    },
     "colorblindr": {
       "Package": "colorblindr",
       "Version": "0.1.0",
@@ -1815,6 +1948,20 @@
         "withr"
       ],
       "Hash": "39b2e002522bfd258039ee4e889e0fd1"
+    },
+    "dbscan": {
+      "Package": "dbscan",
+      "Version": "1.2.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "Rcpp",
+        "generics",
+        "graphics",
+        "stats"
+      ],
+      "Hash": "1279975127344a53d247d3f807576ecf"
     },
     "deldir": {
       "Package": "deldir",
@@ -2476,6 +2623,36 @@
       ],
       "Hash": "1547863db3b472cf7181973acf649f1a"
     },
+    "ggraph": {
+      "Package": "ggraph",
+      "Version": "2.2.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "MASS",
+        "R",
+        "cli",
+        "cpp11",
+        "dplyr",
+        "ggforce",
+        "ggplot2",
+        "ggrepel",
+        "graphlayouts",
+        "grid",
+        "igraph",
+        "lifecycle",
+        "memoise",
+        "rlang",
+        "scales",
+        "stats",
+        "tidygraph",
+        "utils",
+        "vctrs",
+        "viridis",
+        "withr"
+      ],
+      "Hash": "1f5d21a9e1f84b4a81ddacb8f052ca61"
+    },
     "ggrastr": {
       "Package": "ggrastr",
       "Version": "1.0.2",
@@ -2743,6 +2920,19 @@
         "viridisLite"
       ],
       "Hash": "8e63d253afe0e6196318a897e1021813"
+    },
+    "graphlayouts": {
+      "Package": "graphlayouts",
+      "Version": "1.2.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "Rcpp",
+        "RcppArmadillo",
+        "igraph"
+      ],
+      "Hash": "d76658e585295cb85e3982aac84e64c4"
     },
     "gridExtra": {
       "Package": "gridExtra",
@@ -4652,6 +4842,20 @@
       ],
       "Hash": "6581c0a0bb8594b85c8de869644174ac"
     },
+    "sparseMatrixStats": {
+      "Package": "sparseMatrixStats",
+      "Version": "1.18.0",
+      "Source": "Bioconductor",
+      "Repository": "Bioconductor 3.20",
+      "Requirements": [
+        "Matrix",
+        "MatrixGenerics",
+        "Rcpp",
+        "matrixStats",
+        "methods"
+      ],
+      "Hash": "41f8a7d7b60e939d13e1a5f1f07fa42c"
+    },
     "spatstat.data": {
       "Package": "spatstat.data",
       "Version": "3.1-4",
@@ -4878,6 +5082,18 @@
       ],
       "Hash": "0d587599172f2ffda2c09cb6b854e0e5"
     },
+    "terra": {
+      "Package": "terra",
+      "Version": "1.8-29",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "Rcpp",
+        "methods"
+      ],
+      "Hash": "10321b092e16e7c5c02a3bf22727ef39"
+    },
     "textshaping": {
       "Package": "textshaping",
       "Version": "0.4.1",
@@ -4909,6 +5125,29 @@
         "vctrs"
       ],
       "Hash": "a84e2cc86d07289b3b6f5069df7a004c"
+    },
+    "tidygraph": {
+      "Package": "tidygraph",
+      "Version": "1.3.1",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R6",
+        "cli",
+        "cpp11",
+        "dplyr",
+        "igraph",
+        "lifecycle",
+        "magrittr",
+        "pillar",
+        "rlang",
+        "stats",
+        "tibble",
+        "tidyr",
+        "tools",
+        "utils"
+      ],
+      "Hash": "2149824d406f233b57b087be72c5f163"
     },
     "tidyr": {
       "Package": "tidyr",
