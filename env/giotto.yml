@@ -1,0 +1,10 @@
+# Need version 0.5.3 for umap-learn to work with Seurat v4.4.0
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - umap-learn=0.5.3
+  - numpy=1.23.4
+  - imagecodecs
+  - tifffile

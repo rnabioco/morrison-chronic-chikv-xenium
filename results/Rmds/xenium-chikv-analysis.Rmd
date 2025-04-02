@@ -37,7 +37,7 @@ params:
       CHIKV_5:     "CHIKV-5-(0-7566)"                                                # Custom targets to quantify
       CHIKV_neg:   "CHIKV-negative-(0-12036)"
 editor_options: 
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 
 <br>
@@ -70,6 +70,11 @@ knitr::opts_chunk$set(
   echo    = FALSE,
   dpi     = 250
 )
+
+# Set python environment
+reticulate::use_condaenv("giotto", conda = "~/.local/bin/micromamba")
+
+GiottoClass::set_giotto_python_path("giotto")
 
 # Setup chunks
 knitr::knit(here::here(params$template_dir, "setup.qmd"), output = "")
@@ -367,7 +372,7 @@ all other cells were downsampled for visualization.
 
 ```{r "cell type sections", fig.width = 12, fig.height = 10}
 # Legend labels
-cell_n <- xen@meta.data %>%
+cell_n <- xen_dat %>%
   group_by(cell_type) %>%
   summarize(n = n(), .groups = "drop") %>%
   mutate(
@@ -494,7 +499,7 @@ The per-cell prediction confidence for cell type annotations is shown below.
 Scores approaching 1 indicate higher confidence.
 
 ```{r "pred confidence", fig.width = 9, fig.height = 4, out.width = "70%"}
-dat <- xen@meta.data %>%
+dat <- xen_dat %>%
   mutate(
     cell_type = fct_reorder(cell_type, pred_conf, .desc = TRUE)
   )
@@ -1143,9 +1148,82 @@ dat %>%
 
 <br>
 
-## Cell proximity enrichment
+## Cell proximity enrichment {.tabset .tabset-pills}
 
-```{r "giotto object", eval = FALSE}
+```{r "giotto setup"}
+run_giotto <- !file.exists(here("results/prox.tsv.gz"))
+
+.create_prox_bars <- function(df_in, cell_type = "Macrophages", clrs = c(
+    `CHIKV+` = typ_clrs[["Macrophages"]],
+    `CHIKV-` = "#53B3E1",
+    none     = typ_clrs[["other"]]
+  )) {
+  
+  re  <- str_replace_all(cell_type, "\\(", "\\\\(")
+  re  <- str_replace_all(re, "\\)", "\\\\)")
+  re  <- str_c(re, " \\(CHIKV\\+\\)")
+  
+  dat <- prox_df %>%
+    arrange(sample, enrichm) %>%
+    mutate(
+      highlight = grepl(re, unified_int),
+      
+      pos = case_when(
+        highlight & significant & grepl("CHIKV\\+", unified_int) & grepl("CHIKV\\-", unified_int) ~ "CHIKV-",
+        highlight & significant ~ "CHIKV+",
+        TRUE ~ "none"
+      ),
+      interaction = str_remove(unified_int, str_c("[-]*", re, "[-]*")),
+      interaction = str_remove(interaction, "[ ]*\\(CHIKV[-+]\\)[ ]*"),
+      x = str_c(sample, "-", unified_int),
+      x = fct_inorder(x)
+    )
+  
+  # Create bargraphs
+  res <- dat %>%
+    ggplot(aes(x, enrichm, fill = pos)) +
+    geom_col(width = 1) +
+    geom_text_repel(
+      aes(label = interaction),
+      data    = ~ filter(.x, highlight & significant & enrichm > 0),
+      nudge_y = 1,
+      hjust   = 1,
+      size    = 5 / .pt,
+      min.segment.length = 0
+    ) +
+    geom_text_repel(
+      aes(label = interaction),
+      data    = ~ filter(.x, highlight & significant & enrichm < 0),
+      nudge_y = -1,
+      hjust   = 1,
+      size    = 5 / .pt,
+      min.segment.length = 0
+    ) +
+    facet_wrap(~ sample, nrow = 1, scales = "free") +
+    scale_fill_manual(values = clrs, str_c("interactions with CHIKV+ ", cell_type)) +
+    labs(
+      y = "cell-cell interaction\nenrichment",
+      x = "cell-cell interactions"
+    ) +
+    base_theme +
+    theme(
+      legend.position = "bottom",
+      legend.title.position = "top",
+      axis.title.x    = element_text(vjust = 5),
+      axis.text.x     = element_blank(),
+      axis.ticks.x    = element_blank()
+    )
+  
+  res
+}
+```
+
+```{r "giotto object", include = FALSE, eval = run_giotto}
+# Remove unneeded objects
+rm(xen)
+rm(small)
+gc()
+
 # Load CHIKV samples
 gio_dirs <- dir(
   here(data_dir),
@@ -1162,17 +1240,20 @@ nms <- names(nms[grepl("^CHIKV", nms)])
 gio_dirs <- gio_dirs[nms]
 
 # Perform cell proximity analysis
+# * not enough memory to run all together, have to run one by run and reload results
 prox_res <- gio_dirs %>%
   imap(~ {
     # Create Giotto object
     # * store custom targets as separate assay
+    nm <- params$xen_sample_names[[.y]]
+    
     meta <- xen_dat %>%
       filter(fov == .y) %>%
       select(cell_ID = .cell_id, cell_type, cell_class) %>%
       mutate(
         cell_class = recode(cell_class, high = "CHIKV+", low = "CHIKV-"),
         cell_type  = str_c(cell_type, " (", cell_class, ")"),
-        cell_ID    = str_remove(cell_ID, "^[A-Z]_")
+        cell_ID    = str_remove(cell_ID, "^[0-9A-Z\\-]+_")
       ) %>%
       select(-cell_class) %>%
       readCellMetadata()
@@ -1189,7 +1270,7 @@ prox_res <- gio_dirs %>%
       )
     
     obj %>%
-      qsave(here(str_c("results/gio_s", .y, ".qs")))
+      qsave(here(str_c("results/gio_", nm, ".qs")))
       
     # Spatial correlation
     prox <- obj %>%
@@ -1200,28 +1281,76 @@ prox_res <- gio_dirs %>%
       )
     
     prox %>%
-      qsave(here(str_c("results/prox_s", .y, ".qs")))
+      qsave(here(str_c("results/prox_", nm, ".qs")))
+    
+    gc()
     
     prox
   })
 
-# Save proximity enrichment results
-prox_df <- prox_res %>%
-  imap_dfr(~ {
-    .x$enrichm_res %>%
+# Format proximity enrichment results
+prox_df <- params$xen_sample_names[names(gio_dirs)] %>%
+  unname() %>%
+  map_dfr(~ {
+    obj <- qload(here(str_c("results/prox_", .x, ".qs")))
+    
+    obj$enrichm_res %>%
       as_tibble() %>%
-      mutate(slide = str_c("section ", .y))
+      mutate(sample = .x)
   })
 
 prox_df %>%
   write_tsv(here("results/prox.tsv.gz"))
 ```
 
----
+Cell-cell interaction enrichment is shown for each biological replicate for CHIKV+ macrophages.
+Each highlighted bar represents a cell type that showed increased (positive enrichment) or decreased interaction with CHIKV+
+macrophages.
+Bars are colored based on whether the interacting cells were positive or negative for CHIKV RNA (CHIKV+, CHIKV-).
+For example a blue bar labeled as "Macrophages" would represent the interaction between CHIKV+ and CHIKV- macrophages.
+Grey bars represent cell-cell interactions that did not include CHIKV+ macrophages.
+
+```{r "mac giotto proximity", fig.width = 15, fig.height = 3.75}
+# Load data
+prox_df <- read_tsv(here("results/prox.tsv.gz")) %>%
+  mutate(
+    significant = (enrichm > 0 & p.adj_higher < 0.05) | (enrichm < 0 & p.adj_lower < 0.05)
+  ) %>%
+  filter(
+    type_int == "hetero",
+    significant,
+    !is.na(type_int)
+  )
+
+prox_df %>%
+  .create_prox_bars("Macrophages")
+```
 
 <br>
 
-<br>
+Cell-cell interaction enrichment is shown for other CHIKV+ cell types as described above.
+
+```{r "other giotto proximity", fig.width = 15, fig.height = 3.75, results = "asis"}
+typs <- xen_dat %>%
+  filter(cell_type != "Macrophages", cell_class == "high") %>%
+  pull(cell_type) %>%
+  table() %>%
+  sort(decreasing = TRUE)
+
+typs <- typs[typs > 100]
+
+typs %>%
+  iwalk(~ {
+    cat("\n\n###", .y, "\n\n")
+    cat(label_comma()(.x), "CHIKV+ cells were identified for", .y)
+    
+    plt <- prox_df %>%
+      .create_prox_bars(.y)
+    
+    print(plt)
+    cat("\n\n---\n\n<br>\n\n<br>\n\n")
+  })
+```
 
 ## Session info
 

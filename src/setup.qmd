@@ -36,6 +36,7 @@ library(clustifyrdata)
 library(scuttle)
 library(DoubletFinder)
 library(Giotto)         # drieslab
+library(arrow)
 library(M3Drop)
 library(presto)
 library(gprofiler2)
