@@ -120,7 +120,7 @@ key_feats <- names(params$xen_key_targets)
 clmns <- c(
   ".cell_id", "sample", "fov", "cell_type",
   "nCount_Xenium", "nCount_Xenium_custom",
-  "cell_class", "class_type",
+  "cell_class", "class_type", "pred_conf",
   key_feats
 )
 
@@ -1303,12 +1303,16 @@ prox_df %>%
   write_tsv(here("results/prox.tsv.gz"))
 ```
 
-Cell-cell interaction enrichment is shown for each biological replicate for CHIKV+ macrophages.
-Each highlighted bar represents a cell type that showed increased (positive enrichment) or decreased interaction with CHIKV+
+Cell-cell interaction enrichment is shown for each biological replicate for
+CHIKV+ macrophages.
+Each highlighted bar represents a cell type that showed increased
+(positive enrichment) or decreased interaction with CHIKV+ macrophages.
+Bars are colored based on whether the interacting cells were positive or
+negative for CHIKV RNA (CHIKV+, CHIKV-).
+For example, a blue bar labeled as "Macrophages" would represent the interaction
+between CHIKV+ and CHIKV- macrophages.
+Grey bars represent cell-cell interactions that did not include CHIKV+
 macrophages.
-Bars are colored based on whether the interacting cells were positive or negative for CHIKV RNA (CHIKV+, CHIKV-).
-For example a blue bar labeled as "Macrophages" would represent the interaction between CHIKV+ and CHIKV- macrophages.
-Grey bars represent cell-cell interactions that did not include CHIKV+ macrophages.
 
 ```{r "mac giotto proximity", fig.width = 15, fig.height = 3.75}
 # Load data
