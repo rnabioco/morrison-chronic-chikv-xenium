@@ -37,7 +37,7 @@ params:
       CHIKV_5:     "CHIKV-5-(0-7566)"                                                # Custom targets to quantify
       CHIKV_neg:   "CHIKV-negative-(0-12036)"
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 <br>
@@ -116,11 +116,36 @@ sam_lvls <- unname(params$xen_sample_names) %>%
 # Key features
 key_feats <- names(params$xen_key_targets)
 
+# Select cell types to show in main figures
+main_types <- xen@meta.data %>%
+  group_by(cell_type) %>%
+  summarize(pred_conf = median(pred_conf)) %>%
+  arrange(desc(pred_conf)) %>%
+  pull(cell_type)
+
+main_types <- main_types[1:which(main_types == "DC")]
+
+xen <- xen %>%
+  mutate_meta(
+    mutate,
+    cell_type_2 = if_else(
+      cell_type %in% main_types,
+      cell_type,
+      "other"
+    ),
+    class_type_2 = if_else(
+      cell_class == "low",
+      "CHIKV-",
+      cell_type_2
+    )
+  )
+
 # Format plotting data
 clmns <- c(
   ".cell_id", "sample", "fov", "cell_type",
   "nCount_Xenium", "nCount_Xenium_custom",
-  "cell_class", "class_type", "pred_conf",
+  "cell_class", "class_type",
+  "cell_type_2", "class_type_2", "pred_conf",
   key_feats
 )
 
@@ -176,8 +201,25 @@ xen_dat <- xen_dat %>%
   arrange(fov) %>%
   mutate(fov_lab = fct_inorder(fov_lab))
 
+# Format small data
+small <- small %>%
+  AddMetaData(FetchData(xen, c("cell_type_2", "class_type_2")))
+
 small_dat <- xen_dat %>%
   filter(.cell_id %in% plt_cells)
+
+# Select the top cell types with the most CHIKV+ cells
+# * must have at least 20 CHIKV+ for the cell type to be included
+chikv_types <- xen_dat %>%
+  filter(treatment == "CHIKV", cell_class == "high") %>%
+  mutate(cell_type = fct_reorder(cell_type, frac_key_feats, mean, .desc = TRUE)) %>%
+  group_by(sample, cell_type) %>%
+  summarize(n = n(), .groups = "drop") %>%
+  group_by(cell_type) %>%
+  filter(min(n) >= 20) %>%
+  summarize(n = sum(n)) %>%
+  arrange(cell_type) %>%
+  pull(n, cell_type)
 ```
 
 ```{r "theme"}
@@ -258,8 +300,9 @@ typ_clrs <- set_names(
 typ_clrs <- typ_clrs %>%
   spruce_colors(difference = Inf, filter = "colorblind")
 
-typ_clrs[c("other", "low")] <- "grey85"
-typ_clrs["Macrophages"]     <- "#D7301F"
+typ_clrs[c("CHIKV-", "low")] <- "grey85"
+typ_clrs["other"]            <- "grey50"
+typ_clrs["Macrophages"]      <- "#D7301F"
 
 typ_clrs["Fibroblasts"] <- darken(typ_clrs["Fibroblasts"], 0.75)
 
@@ -465,6 +508,34 @@ fig
 
 ### {.tabset .tabset-pills}
 
+Tissue sections are shown with only the top cell types labeled
+(assessed based on annotation confidence shown below).
+
+```{r "top cell types sections", fig.width = 16, fig.height = 8, results = "asis", out.height = "70%"}
+fovs %>%
+  walk(~ {
+    cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
+    
+    fig <- xen_dat %>%
+      .plot_full_fov(
+        fov   = .x,
+        color = "cell_type_2",
+        trace = "Macrophages",
+        clrs  = typ_clrs,
+        size       = 0.5,
+        trace_size = 0.5,
+        trace_clr  = NA
+      )
+    
+    print(fig)
+    cat("\n\n<br>\n\n<br>\n\n")
+  })
+```
+
+<br>
+
+### {.tabset .tabset-pills}
+
 High resolution images show all cells (left) or all cells with
 `r str_flatten(top_types, collapse = ", ", last = " and ")`
 highlighted (right).
@@ -487,6 +558,97 @@ fovs %>%
         align = "h",
         axis  = "tb"    
       )
+    
+    print(fig)
+    cat("\n\n<br>\n\n<br>\n\n")
+  })
+```
+
+<br>
+
+### {.tabset .tabset-pills}
+
+Heatmaps show the spatial distribution of cell types for each sample.
+Only cell types with at least 250 cells are shown, cells with no assigned
+cell type are excluded.
+
+```{r "xenium cell type sections", fig.width = 14, fig.height = 14, results = "asis"}
+fovs %>%
+  walk(~ {
+    cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
+    
+    # Format data for plots
+    # * only show cell types with >100 cells
+    # * do not show unassigned cells
+    plt_dat <- xen_dat %>%
+      filter(fov == .x)
+    
+    xen_typs <- plt_dat$cell_type %>%
+      table() %>%
+      sort(decreasing = TRUE)
+    
+    xen_typs <- xen_typs[xen_typs >= 250]
+    xen_typs <- xen_typs[names(xen_typs) != "unassigned"]
+    
+    # Function to set number of bins based on number of cells
+    fn <- approxfun(c(last(xen_typs), xen_typs[[1]]), c(45, 100))
+    
+    # Create base plot to use for overlaying frequency data
+    n_bins <- floor(fn(max(xen_typs)))
+    
+    base_xen <- plt_dat %>%
+      ggplot(aes(x_cell, y_cell)) +
+      geom_bin2d(
+        aes(fill = NULL),
+        bins = n_bins,
+        linewidth = 1, color = "black", fill = "white"
+      ) +
+      geom_bin2d(
+        aes(fill = NULL),
+        bins = n_bins,
+        color = NA, fill = "white",
+      )
+    
+    # Create plots
+    typ_plts <- names(xen_typs) %>%
+      map(~ {
+        typ <- .x
+        
+        typ_dat <- plt_dat %>%
+          filter(cell_type == typ)
+        
+        ttl <- typ_dat %>%
+          nrow() %>%
+          label_comma()() %>%
+          str_c(typ, " (n = ", ., ")")
+        
+        base_xen +
+          geom_bin2d(
+            data = typ_dat,
+            bins = n_bins
+          ) +
+          
+          ggtitle(ttl) +
+          guides(fill = guide_colorbar(ticks = FALSE)) +
+          scale_fill_gradientn(
+            colours = c("white", "#D7301F"),  # just use red for all slices
+            name = "number of cells"
+          ) +
+          coord_equal() +
+          umap_theme_2 +
+          theme(
+            plot.title        = element_text(hjust = 0.5),
+            legend.position   = "bottom",
+            legend.key.height = unit(7, "pt"),
+            legend.key.width  = unit(20, "pt"),
+            legend.title      = element_text(size = 10, hjust = 0.5),
+            legend.text       = element_text(size = 10),
+            legend.title.position = "top"
+          )
+      })
+    
+    fig <- typ_plts %>%
+      wrap_plots(ncol = 3)
     
     print(fig)
     cat("\n\n<br>\n\n<br>\n\n")
@@ -697,16 +859,44 @@ CHIKV+ cells (>0 total CHIKV counts) are shown for tissue sections.
   plot_dat      = small,
   class_clmn    = "cell_class",
   class         = "high",
-  celltype_clmn = "cell_type",
+  celltype_clmn = "cell_type_2",
   clrs          = typ_clrs,
   top_types     = top_types,
   nrow          = 3,
-  y_ttl         = "% CHIKV+ cells",
+  y_ttl         = "# CHIKV+ cells",
   alph          = rep(1, n_distinct(xen_dat$rep))
 )
 ```
 
 <br>
+
+### {.tabset .tabset-pills}
+
+Tissue sections are shown with only the top cell types
+(based on annotation confidence) labeled for CHIKV+ cells.
+
+```{r "top cell types CHIKV+ sections", fig.width = 16, fig.height = 8, results = "asis", out.height = "70%"}
+fovs %>%
+  walk(~ {
+    cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
+    
+    fig <- xen_dat %>%
+      .plot_full_fov(
+        fov   = .x,
+        color = "class_type_2",
+        trace = "Macrophages",
+        clrs  = typ_clrs,
+        size       = 1,
+        trace_size = 1,
+        trace_clr  = NA
+      )
+    
+    print(fig)
+    cat("\n\n<br>\n\n<br>\n\n")
+  })
+```
+
+### {.tabset .tabset-pills}
 
 High-resolution images show CHIKV counts (left) and CHIKV+ cells (right)
 for each tissue section.
@@ -743,6 +933,87 @@ fovs %>%
       
     print(fig)
     cat("\n\n")
+  })
+```
+
+### {.tabset .tabset-pills}
+
+Heatmaps show the spatial distribution of CHIKV+ cells for each cell type.
+Only cell types with at least 20 CHIKV+ cells for all replicates are shown.
+
+```{r "CHIKV+ heatmap sections", fig.width = 14, fig.height = 14, results = "asis"}
+fovs %>%
+  walk(~ {
+    cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
+    
+    # Format data for plots
+    # * only show cell types with >100 cells
+    # * do not show unassigned cells
+    plt_dat <- xen_dat %>%
+      filter(fov == .x)
+    
+    # Create base plot to use for overlaying frequency data
+    n_bins <- 75
+    
+    base_xen <- plt_dat %>%
+      ggplot(aes(x_cell, y_cell)) +
+      geom_bin2d(
+        aes(fill = NULL),
+        bins = n_bins,
+        linewidth = 1, color = "black", fill = "white"
+      ) +
+      geom_bin2d(
+        aes(fill = NULL),
+        bins = n_bins,
+        color = NA, fill = "white",
+      )
+    
+    # Create plots
+    typ_plts <- names(sort(chikv_types, decreasing = TRUE)) %>%
+      map(~ {
+        typ <- .x
+        
+        typ_dat <- plt_dat %>%
+          filter(
+            cell_type == typ,
+            cell_class == "high"
+          )
+        
+        ttl <- typ_dat %>%
+          nrow() %>%
+          label_comma()() %>%
+          str_c(typ, " (n = ", ., ")")
+        
+        base_xen +
+          geom_bin2d(
+            data = typ_dat,
+            bins = n_bins
+          ) +
+          
+          ggtitle(ttl) +
+          guides(fill = guide_colorbar(ticks = FALSE)) +
+          scale_fill_gradientn(
+            colours = c("white", "#D7301F"),  # just use red for all slices
+            name = "number of cells"
+          ) +
+          coord_equal() +
+          umap_theme_2 +
+          theme(
+            plot.title        = element_text(hjust = 0.5),
+            legend.position   = "bottom",
+            legend.key.height = unit(7, "pt"),
+            legend.key.width  = unit(20, "pt"),
+            legend.title      = element_text(size = 10, hjust = 0.5),
+            legend.text       = element_text(size = 10),
+            legend.title.position = "top"
+          )
+      })
+    
+    fig <- typ_plts %>%
+      wrap_plots(ncol = 3)
+    
+    print(fig)
+    cat("\n\n<br>\n\n<br>\n\n")
   })
 ```
 
@@ -810,7 +1081,7 @@ type_dat %>%
 dat <- xen_dat %>%
   filter(treatment == "CHIKV", cell_class == "high") %>%
   group_by(sample, cell_type) %>%
-  filter(n() > 20) %>%
+  filter(n() >= 20) %>%
   ungroup() %>%
   mutate(
     cell_type = fct_reorder(cell_type, frac_key_feats, mean, .desc = TRUE),
@@ -859,7 +1130,7 @@ dat %>%
 
 <br>
 
-### CHIKV signals are higher for sgRNA probes
+### CHIKV signals are higher for CHIKV 3' probes
 
 The % CHIKV+ cells is shown for each cell type.
 The number of CHIKV+ cells is shown above each bar.
@@ -1003,7 +1274,7 @@ ggsave(
 
 <br>
 
-Total counts assigned to sgRNA, 5' (nsP genes), and
+Total counts assigned to 3' (sgRNA), 5' (nsP genes), and
 negative strand CHIKV probes is shown for CHIKV+ cells.
 The number of cells plotted is shown above each boxplot.
 
@@ -1016,17 +1287,8 @@ key_nms <- set_names(
 
 chikv_clrs <- set_names(c("#D7301F", "#0072B2", "#009E73"), names(key_nms))
 
-# Top cell types with detectable CHIKV RNA
-chikv_types <- xen_dat %>%
-  filter(treatment == "CHIKV", cell_class == "high") %>%
-  mutate(cell_type = fct_reorder(cell_type, frac_key_feats, mean, .desc = TRUE)) %>%
-  pull(cell_type) %>%
-  sort() %>%
-  table()
-
-chikv_types <- names(chikv_types[chikv_types > 50][1:3])
-
-plts <- chikv_types %>%
+# Create boxplots
+plts <- names(chikv_types[1:4]) %>%
   map(~ {
     dat <- xen_dat %>%
       filter(cell_type == .x, treatment == "CHIKV", cell_class == "high") %>%
@@ -1082,7 +1344,7 @@ wrap_plots(
 
 <br>
 
-The fraction of CHIKV+ cells with detectable sgRNA, 5' (nsP genes), and
+The fraction of CHIKV+ cells with detectable 3' (sgRNA), 5' (nsP genes), and
 negative strand signal is shown for each sample.
 The CHIKV+ class indicates which probes were detectable within the cell, e.g.,
 "sgRNA/5'/neg" had signal for all three regions and "sgRNA" only had
@@ -1094,20 +1356,23 @@ Only cell types with >100 total CHIKV+ cells are shown.
 xen_dat <- xen_dat %>%
   mutate(
     chikv_class = case_when(
-      CHIKV_sgRNA > 0 & CHIKV_5 > 0 & CHIKV_neg > 0 ~ "sgRNA/5'/neg",
-      CHIKV_sgRNA > 0 & CHIKV_5 > 0                 ~ "sgRNA/5'",
-      CHIKV_sgRNA > 0                               ~ "sgRNA",
+      CHIKV_sgRNA > 0 & CHIKV_5 > 0 & CHIKV_neg > 0 ~ "3'/5'/neg",
+      CHIKV_sgRNA > 0 & CHIKV_5 > 0                 ~ "3'/5'",
+      CHIKV_sgRNA > 0                               ~ "3'",
       CHIKV_5 > 0 & CHIKV_neg > 0                   ~ "5'/neg",
       CHIKV_5 > 0                                   ~ "5'",
       CHIKV_neg > 0                                 ~ "neg",
-      cell_class == "low"                           ~ "CHIKV-low",
+      cell_class == "low"                           ~ "CHIKV-",
       TRUE                                          ~ "other"
     )
   )
 
 # Format plot data
 dat <- xen_dat %>%
-  filter(cell_class == "high") %>%
+  filter(
+    treatment  == "CHIKV",
+    cell_class == "high"
+  ) %>%
   mutate(chikv_class = fct_infreq(chikv_class)) %>%
   group_by(cell_type) %>%
   filter(n_distinct(.cell_id) > 100) %>%
@@ -1130,7 +1395,7 @@ dat %>%
     data = n_dat,
     vjust = 0
   ) +
-  facet_wrap(~ cell_type) +
+  facet_wrap(~ cell_type, ncol = 4) +
   scale_fill_manual(values = clrs) +
   scale_y_continuous(expand = expansion(c(0.05, 0.15)), breaks = c(0, 0.5, 1)) +
   labs(y = "fraction of CHIKV+ cells") +
@@ -1156,7 +1421,7 @@ run_giotto <- !file.exists(here("results/prox.tsv.gz"))
 .create_prox_bars <- function(df_in, cell_type = "Macrophages", clrs = c(
     `CHIKV+` = typ_clrs[["Macrophages"]],
     `CHIKV-` = "#53B3E1",
-    none     = typ_clrs[["other"]]
+    none     = typ_clrs[["low"]]
   )) {
   
   re  <- str_replace_all(cell_type, "\\(", "\\\\(")
@@ -1209,7 +1474,7 @@ run_giotto <- !file.exists(here("results/prox.tsv.gz"))
     theme(
       legend.position = "bottom",
       legend.title.position = "top",
-      axis.title.x    = element_text(vjust = 5),
+      axis.title.x    = element_text(vjust = 2),
       axis.text.x     = element_blank(),
       axis.ticks.x    = element_blank()
     )
@@ -1309,6 +1574,8 @@ Each highlighted bar represents a cell type that showed increased
 (positive enrichment) or decreased interaction with CHIKV+ macrophages.
 Bars are colored based on whether the interacting cells were positive or
 negative for CHIKV RNA (CHIKV+, CHIKV-).
+Interactions are only shown for cell types with at least 20 CHIKV+ cells
+identified in all three biological replicates.
 For example, a blue bar labeled as "Macrophages" would represent the interaction
 between CHIKV+ and CHIKV- macrophages.
 Grey bars represent cell-cell interactions that did not include CHIKV+
@@ -1326,6 +1593,24 @@ prox_df <- read_tsv(here("results/prox.tsv.gz")) %>%
     !is.na(type_int)
   )
 
+# Filter cell types
+prox_df <- prox_df %>%
+  separate(
+    unified_int,
+    into = c("cell_type_1", "cell_type_2"),
+    sep = "--",
+    remove = FALSE
+  ) %>%
+  mutate(across(
+    starts_with("cell_type_"),
+    ~ str_remove(.x, " \\(CHIKV[-+]\\)$")
+  )) %>%
+  filter(
+    cell_type_1 %in% names(chikv_types) &
+      cell_type_2 %in% names(chikv_types)
+  )
+
+# Create proximity bargraph
 prox_df %>%
   .create_prox_bars("Macrophages")
 ```
@@ -1341,7 +1626,7 @@ typs <- xen_dat %>%
   table() %>%
   sort(decreasing = TRUE)
 
-typs <- typs[typs > 100]
+typs <- typs[names(typs) %in% names(chikv_types)]
 
 typs %>%
   iwalk(~ {
