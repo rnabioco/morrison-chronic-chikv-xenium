@@ -37,7 +37,7 @@ params:
       CHIKV_5:     "CHIKV-5-(0-7566)"                                                # Custom targets to quantify
       CHIKV_neg:   "CHIKV-negative-(0-12036)"
 editor_options: 
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 
 <br>
@@ -45,16 +45,29 @@ editor_options:
 ## Summary
 
 * Cell types were annotated using CHIKV 28 dpi scRNA-seq data
-* Macrophages harbor CHIKV RNA, but more work is needed to assess enrichment of
-  CHIKV+ cells in different cell populations
-* Signal was detected for CHIKV sgRNA, 5' (nsP genes), and negative strand probes
-* The strongest CHIKV signal was detected for sgRNA probes
+* Macrophages harbor CHIKV RNA
+* Signal was detected for CHIKV 3' (sgRNA), 5' (nsP genes), and negative strand probes
+* The strongest CHIKV signal was detected for 3' probes
 
 <u>To do</u>
 
-* Refine/verify cell type annotations
-* Further assessment of CHIKV+ cells
-* Identification of differentially expressed genes in CHIKV-infected samples
+- [x] &nbsp;Heatmap of all of the ankles showing spatial distribution of each
+  cell type.
+- [x] &nbsp;For CHIKV infection sections, label the total number of CHIKV RNA+
+  cells for each individual ankle instead of all of them together.
+  As well as graph the total number of CHIKV RNA+ cells for each cell subset
+  instead of the % CHIKV RNA+ cells.
+- [x] &nbsp;For that same section, make a cutoff of 20 cells so any cell types
+  with fewer than 20 CHIKV+ cells would be excluded.
+- [x] &nbsp;Change "low" to CHIKV RNA negative
+- [x] &nbsp;Change the CHIKV RNA species bar graphs to only include cell types
+  that are above the 0.5 confidence interval.
+  So take out unassigned.
+- [x] &nbsp;Change the subgenomic label in the axis to 3' and take out the mock
+  samples.
+- [ ] &nbsp;Double check that cells labeled “DC” are not actually macrophages.
+  This came up because CHIKV RNA+ DC have the highest enrichment for interaction
+  with CHIKV RNA+ macrophages.
 
 <br>
 
@@ -114,6 +127,8 @@ sam_lvls <- unname(params$xen_sample_names) %>%
   unique()
 
 # Key features
+# * select based on median prediction confidence
+# * make sure T cells are included
 key_feats <- names(params$xen_key_targets)
 
 # Select cell types to show in main figures
@@ -124,6 +139,8 @@ main_types <- xen@meta.data %>%
   pull(cell_type)
 
 main_types <- main_types[1:which(main_types == "DC")]
+
+main_types <- unique(c(main_types, "T cells"))
 
 xen <- xen %>%
   mutate_meta(
@@ -291,6 +308,7 @@ clrs <- ito_cols
 
 # Cell type colors
 typs <- unique(xen$cell_type)
+typs <- typs[typs != "unassigned"]
 
 typ_clrs <- set_names(
   clrs[seq_along(typs)],
@@ -300,7 +318,7 @@ typ_clrs <- set_names(
 typ_clrs <- typ_clrs %>%
   spruce_colors(difference = Inf, filter = "colorblind")
 
-typ_clrs[c("CHIKV-", "low")] <- "grey85"
+typ_clrs[c("CHIKV-", "low", "unassigned")] <- "grey85"
 typ_clrs["other"]            <- "grey50"
 typ_clrs["Macrophages"]      <- "#D7301F"
 
@@ -409,9 +427,7 @@ heat_dat %>%
 
 Cell types were annotated using 28 dpi CHIKV scRNA-seq data.
 Annotated cell types are shown for tissue sections.
-All `r str_flatten(top_types, collapse = ", ", last = " and ")`
-and all CHIKV+ cells are shown,
-all other cells were downsampled for visualization.
+All CHIKV+ cells are shown, all other cells were downsampled for visualization.
 
 ```{r "cell type sections", fig.width = 12, fig.height = 10}
 # Legend labels
@@ -420,10 +436,10 @@ cell_n <- xen_dat %>%
   summarize(n = n(), .groups = "drop") %>%
   mutate(
     pct   = round((n / sum(n)) * 100, 1),
-    n_lab = ifelse(
-      n >= 1000,
-      str_c(round(n / 1000, 1), "k"),
-      label_comma()(n)
+    n_lab = case_when(
+      n >= 10000 ~ str_c(round(n / 1000, 0), "k"),
+      n >= 1000  ~ str_c(round(n / 1000, 1), "k"),
+      TRUE       ~ label_comma()(n)
     ),
     n_lab = str_c(cell_type, " (", n_lab, ", ", pct, "%)")
   ) %>%
@@ -432,18 +448,19 @@ cell_n <- xen_dat %>%
 lgnd_labs <- set_names(cell_n$n_lab, cell_n$cell_type)
 
 # Create section plots
-Idents(small) <- small$cell_type
-
 plts <- fovs %>%
   map(~ {
     p <- small_dat %>%
       filter(fov == .x) %>%
-      ggplot(aes(x_cell, -y_cell, color = cell_type)) +
+      mutate(cell_type = fct_relevel(cell_type, cell_n$cell_type)) %>%
+      arrange(cell_type) %>%
+      ggplot(aes(x_cell, y_cell, color = cell_type)) +
       geom_point(size = 0.25) +
       guides(color = guide_legend(override.aes = list(shape = 15, size = 4))) +
       scale_color_manual(values = typ_clrs) +
-      labs(tag = fov_lvls[.x]) +
+      labs(tag = params$xen_sample_names[[.x]]) +
       coord_fixed() +
+      scale_y_reverse(expand = expansion(c(0.05, 0.15))) +
       umap_theme +
       theme(
         legend.position   = "none",
@@ -467,10 +484,10 @@ ht_dat <- xen_dat %>%
   summarize(n_type = n_distinct(.cell_id), .groups = "drop") %>%
   mutate(
     pct_type = n_type / n,
-    n_lab    = if_else(
-      n_type >= 1000,
-      str_c(round(n_type / 1000, 1), "k"),
-      as.character(n_type)
+    n_lab    = case_when(
+      n_type >= 10000 ~ str_c(round(n_type / 1000, 0), "k"),
+      n_type >= 1000  ~ str_c(round(n_type / 1000, 1), "k"),
+      TRUE            ~ as.character(n_type)
     ),
     cell_type = fct_reorder(cell_type, pct_type, .desc = TRUE)
   )
@@ -480,11 +497,11 @@ ht <- ht_dat %>%
   geom_col() +
   geom_text(
     aes(label = n_lab, fill = NULL),
-    vjust = 0
+    vjust = -0.1
   ) +
   facet_wrap(~ cell_type, scale = "free_y") +
   scale_fill_manual(values = typ_clrs) +
-  scale_y_continuous(labels = label_percent(), expand = expansion(c(0.05, 0.2))) +
+  scale_y_continuous(labels = label_percent(), expand = expansion(c(0.05, 0.25))) +
   labs(y = "% of total cells") +
   base_theme +
   theme(
@@ -547,10 +564,11 @@ fovs %>%
     
     fig <- xen_dat %>%
       .plot_full_fov(
-        fov   = .x,
-        color = "cell_type",
-        trace = list("NONE", "Macrophages"),
-        clrs  = typ_clrs
+        fov    = .x,
+        color  = "cell_type_2",
+        trace  = list("NONE", "Macrophages"),
+        clrs   = typ_clrs,
+        show_n = FALSE
       ) %>%
       plot_grid(
         plotlist = .,
@@ -634,6 +652,7 @@ fovs %>%
             colours = c("white", "#D7301F"),  # just use red for all slices
             name = "number of cells"
           ) +
+          scale_y_reverse() +
           coord_equal() +
           umap_theme_2 +
           theme(
@@ -659,6 +678,8 @@ fovs %>%
 
 The per-cell prediction confidence for cell type annotations is shown below.
 Scores approaching 1 indicate higher confidence.
+Some unassigned cells have a high prediction confidence since the reference
+includes cells that were unassigned in the scRNA-seq data.
 
 ```{r "pred confidence", fig.width = 9, fig.height = 4, out.width = "70%"}
 dat <- xen_dat %>%
@@ -997,6 +1018,7 @@ fovs %>%
             name = "number of cells"
           ) +
           coord_equal() +
+          scale_y_reverse() +
           umap_theme_2 +
           theme(
             plot.title        = element_text(hjust = 0.5),
@@ -1135,10 +1157,67 @@ dat %>%
 The % CHIKV+ cells is shown for each cell type.
 The number of CHIKV+ cells is shown above each bar.
 
+```{r "CHIKV+ bargraphs PAPER", fig.width = 8, fig.height = 4, out.width = "70%"}
+frac_clmns <- str_c("frac_", key_feats)
+
+# Format bargraph data
+bar_dat <- xen_dat %>%
+  filter(
+    treatment == "CHIKV",
+    cell_type %in% c("Macrophages", "Fibroblasts")
+  ) %>%
+  group_by(sample, cell_type) %>%
+  mutate(n = n()) %>%
+  pivot_longer(all_of(key_feats)) %>%
+  ungroup() %>%
+  group_by(sample, cell_type, name, n) %>%
+  summarize(
+    n_pos   = sum(value > 0),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    frac_pos = n_pos / n,
+    across(
+      c(n, n_pos),
+      ~ if_else(.x >= 1000, str_c(round(.x / 1000, 1), "k"), as.character(.x))
+    ),
+    n_lab     = str_c(n_pos, "/", n),
+    name      = fct_relevel(name, key_feats),
+    cell_type = fct_reorder(cell_type, frac_pos, .desc = TRUE)
+  )
+
+# Plot labels
+lbs <- c(
+  "CHIKV_sgRNA" = "CHIKV 3'",
+  "CHIKV_5"     = "CHIKV 5'",
+  "CHIKV_neg"   = "CHIKV neg"
+)
+
+# Create bargraphs
+bar_dat %>%
+  filter(cell_type %in% c("Macrophages", "Fibroblasts")) %>%
+  ggplot(aes(cell_type, frac_pos, fill = cell_type, group = sample)) +
+  geom_col(position = position_dodge(width = 0.95)) +
+  geom_text(
+    aes(label = n_lab, fill = NULL),
+    angle = 90, hjust = 0,
+    position = position_dodge(width = 0.95)
+  ) +
+  facet_wrap(~ name, labeller = as_labeller(lbs)) +
+  scale_fill_manual(values = typ_clrs) +
+  scale_y_continuous(expand = expansion(c(0.05, 0.35)), labels = label_percent()) +
+  labs(y = "% CHIKV+ cells") +
+  base_theme +
+  theme(
+    legend.position = "none",
+    axis.title.x    = element_blank()
+  )
+```
+
 ```{r "CHIKV+ bargraphs", fig.width = 10, fig.height = 4, out.width = "70%"}
 frac_clmns <- str_c("frac_", key_feats)
 
-dat <- xen_dat %>%
+bar_dat <- xen_dat %>%
   filter(treatment == "CHIKV") %>%
   group_by(cell_type) %>%
   mutate(n = n()) %>%
@@ -1161,7 +1240,7 @@ dat <- xen_dat %>%
   )
 
 # Create bargraphs
-dat %>%
+bar_dat %>%
   ggplot(aes(cell_type, frac_pos, fill = cell_type)) +
   geom_col() +
   geom_text(
@@ -1178,7 +1257,6 @@ dat %>%
     axis.text.x     = element_text(angle = 45, hjust = 1),
     axis.title.x    = element_blank()
   )
-
 ```
 
 ```{r "CHIKV+ bargraphs DATA CLUB", fig.width = 10, fig.height = 4, out.width = "70%", eval = FALSE}
@@ -1351,7 +1429,7 @@ The CHIKV+ class indicates which probes were detectable within the cell, e.g.,
 signal for sgRNA probes.
 Only cell types with >100 total CHIKV+ cells are shown.
 
-```{r "CHIKV SIGNAL GROUPS", fig.width = 10, fig.height = 5, out.width = "70%"}
+```{r "CHIKV SIGNAL GROUPS PAPER", fig.width = 6, fig.height = 4, out.width = "70%"}
 # Set CHIKV groups
 xen_dat <- xen_dat %>%
   mutate(
@@ -1368,7 +1446,7 @@ xen_dat <- xen_dat %>%
   )
 
 # Format plot data
-dat <- xen_dat %>%
+grp_dat <- xen_dat %>%
   filter(
     treatment  == "CHIKV",
     cell_class == "high"
@@ -1379,7 +1457,7 @@ dat <- xen_dat %>%
   ungroup() %>%
   mutate(cell_type = fct_infreq(cell_type))
 
-n_dat <- dat %>%
+n_dat <- grp_dat %>%
   group_by(sample, cell_type) %>%
   summarize(n = n_distinct(.cell_id), .groups = "drop") %>%
   mutate(
@@ -1387,7 +1465,30 @@ n_dat <- dat %>%
   )
 
 # Create bargraphs
-dat %>%
+grp_dat %>%
+  filter(cell_type %in% c("Macrophages", "Fibroblasts")) %>%
+  ggplot(aes(sample, fill = chikv_class)) +
+  geom_bar(position = "fill") +
+  geom_text(
+    aes(y = 1, label = n_lab, fill = NULL),
+    data = ~ filter(n_dat, cell_type %in% c("Macrophages", "Fibroblasts")),
+    vjust = 0
+  ) +
+  facet_wrap(~ cell_type, ncol = 4) +
+  scale_fill_manual(values = clrs) +
+  scale_y_continuous(expand = expansion(c(0.05, 0.15)), breaks = c(0, 0.5, 1)) +
+  labs(y = "fraction of CHIKV+ cells") +
+  guides(fill = guide_legend(title = "CHIKV+ class")) +
+  base_theme +
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x  = element_text(angle = 45, hjust = 1)
+  )
+```
+
+```{r "CHIKV SIGNAL GROUPS", fig.width = 10, fig.height = 5, out.width = "70%"}
+# Create bargraphs
+grp_dat %>%
   ggplot(aes(sample, fill = chikv_class)) +
   geom_bar(position = "fill") +
   geom_text(

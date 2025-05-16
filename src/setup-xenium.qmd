@@ -45,7 +45,7 @@ create_sobjs <- !file.exists(here(obj_dir, str_c(obj_prfx, ".qs")))
 ```{r "{{obj_prfx}} functions"}
 .plot_full_fov <- function(df_in, fov_in, color, x = "x_cell", y = "y_cell",
                            trace = list(), clrs, lvls = NULL, size = 0.3,
-                           trace_size = 1, trace_clr = "black") {
+                           trace_size = 1, trace_clr = "black", show_n = TRUE) {
   
   # Format input data
   plt_theme <- umap_theme +
@@ -71,6 +71,8 @@ create_sobjs <- !file.exists(here(obj_dir, str_c(obj_prfx, ".qs")))
         arrange(desc(!!sym(color) %in% .x), desc(n))
       
       n_labs <- set_names(n_dat$n_lab, n_dat[[color]])
+      
+      if (!show_n) n_labs <- waiver()
       
       lvls <- lvls %||% names(n_labs)
       
@@ -103,9 +105,10 @@ create_sobjs <- !file.exists(here(obj_dir, str_c(obj_prfx, ".qs")))
   # Format input data
   plt_theme <- umap_theme +
     theme(
-      legend.key.height = unit(30, "pt"),
-      legend.key.width  = unit(7, "pt"),
-      legend.title      = element_text(size = 18)
+      legend.key.height = unit(60, "pt"),
+      legend.key.width  = unit(14, "pt"),
+      legend.title      = element_text(size = 36),
+      legend.text       = element_text(size = 18)
     )
   
   dat <- df_in %>%
@@ -131,7 +134,7 @@ create_sobjs <- !file.exists(here(obj_dir, str_c(obj_prfx, ".qs")))
 # e.g. Ag+ or CHIKV+
 .create_class_figure <- function(bar_dat, plot_dat, class_clmn, class,
                                  celltype_clmn, clrs, top_types = NULL,
-                                 n_cells = 30, nrow = 3,
+                                 n_cells = 20, nrow = 3,
                                  rel_heights = rep(1, nrow), y_ttl = NULL,
                                  alph = c("1" = 1, "2" = 0.75, "3" = 0.5, "4" = 0.25)) {
   
@@ -159,35 +162,44 @@ create_sobjs <- !file.exists(here(obj_dir, str_c(obj_prfx, ".qs")))
   # Do not plot cell types with very few cells
   ag_dat <- bar_dat %>%
     group_by(sample, !!sym(celltype_clmn)) %>%
-    filter(n() > n_cells) %>%
+    filter(n() >= n_cells) %>%
     
     group_by(sample, rep, !!sym(celltype_clmn)) %>%
     summarize(
       n       = n(),
-      frac    = sum(!!sym(class_clmn) == class),
-      # frac    = frac / n,
+      n_class = sum(!!sym(class_clmn) == class),
+      frac    = n_class / n,
       .groups = "drop"
     ) %>%
     mutate(
       !!sym(celltype_clmn) := fct_reorder(
-        !!sym(celltype_clmn), frac,
+        !!sym(celltype_clmn), n_class,
         .fun = mean,
         .desc = TRUE
-      )
+      ),
+      n     = if_else(n >= 1000, str_c(round(n / 1000, 0), "k"), as.character(n)),
+      n_lab = if_else(n_class >= 1000, str_c(round(n_class / 1000, 0), "k"), as.character(n_class)),
+      n_lab = str_c(n_lab, "/", n)
     )
   
   # Create bargraphs
   ag_brs <- ag_dat %>%
     ggplot(aes(
-      !!sym(celltype_clmn), frac,
+      !!sym(celltype_clmn), n_class,
       fill  = !!sym(celltype_clmn),
       alpha = as.character(rep)
     )) +
     geom_col(position = position_dodge()) +
+    
+    geom_text(
+      aes(label = n_lab),
+      vjust = -0.2
+    ) +
+    
     facet_wrap(~ sample, ncol = 1, strip.position = "right") +
     scale_alpha_manual(values = alph) +
     scale_fill_manual(values = clrs) +
-    scale_y_continuous(breaks = pretty_breaks(n = 2)) +
+    scale_y_continuous(breaks = pretty_breaks(n = 2), expand = expansion(c(0.05, 0.2))) +
     # scale_y_continuous(labels = label_percent(), breaks = pretty_breaks(n = 2)) +
     labs(y = y_ttl) +
     base_theme +
@@ -657,12 +669,14 @@ xen <- xen %>%
 
 # Select subset of cells to plot
 # * too many points to plot, downsample when plotting sections
+# * include all CHIKV+ cells
 set.seed(42)
 
 plt_cells <- sample(colnames(xen), 50000)
 
 plt_cells <- xen@meta.data %>%
-  filter(cell_type %in% top_types | cell_class == "high") %>%
+  filter(cell_class == "high") %>%
+  # filter(cell_type %in% top_types | cell_class == "high") %>%
   rownames() %>%
   c(plt_cells) %>%
   unique()
