@@ -37,7 +37,7 @@ params:
       CHIKV_5:     "CHIKV-5-(0-7566)"                                                # Custom targets to quantify
       CHIKV_neg:   "CHIKV-negative-(0-12036)"
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 <br>
@@ -1517,7 +1517,7 @@ grp_dat %>%
 ## Cell proximity enrichment {.tabset .tabset-pills}
 
 ```{r "giotto setup"}
-run_giotto <- !file.exists(here("results/prox.tsv.gz"))
+create_giotto <- !file.exists(here("results/prox.tsv.gz"))
 
 .create_prox_bars <- function(df_in, cell_type = "Macrophages", clrs = c(
     `CHIKV+` = typ_clrs[["Macrophages"]],
@@ -1584,7 +1584,7 @@ run_giotto <- !file.exists(here("results/prox.tsv.gz"))
 }
 ```
 
-```{r "giotto object", include = FALSE, eval = run_giotto}
+```{r "giotto object", include = FALSE, eval = create_giotto}
 # Remove unneeded objects
 rm(xen)
 rm(small)
@@ -1611,7 +1611,7 @@ prox_res <- gio_dirs %>%
   imap(~ {
     # Create Giotto object
     # * store custom targets as separate assay
-    nm <- params$xen_sample_names[[.y]]
+    nm <- str_c("_", params$xen_sample_names[[.y]])
     
     meta <- xen_dat %>%
       filter(fov == .y) %>%
@@ -1621,33 +1621,55 @@ prox_res <- gio_dirs %>%
         cell_type  = str_c(cell_type, " (", cell_class, ")"),
         cell_ID    = str_remove(cell_ID, "^[0-9A-Z\\-]+_")
       ) %>%
-      select(-cell_class) %>%
-      readCellMetadata()
+      select(-cell_class)
     
-    obj <- .x %>%
-      createGiottoXeniumObject() %>%
-      setCellMetadata(meta)
-    
-    # Spatial network
-    obj <- obj %>%
-      createSpatialDelaunayNetwork(
-        spat_unit = "cell",
-        feat_type = "rna"
+    prox <- meta %>%
+      run_giotto(
+        xen_dir     = .x,
+        clmn        = "cell_type",
+        file_dir    = "results",
+        file_prefix = nm
       )
     
-    obj %>%
-      qsave(here(str_c("results/gio_", nm, ".qs")))
-      
-    # Spatial correlation
-    prox <- obj %>%
-      cellProximityEnrichment(
-        spat_unit      = "cell",
-        feat_type      = "rna",
-        cluster_column = "cell_type"
-      )
+    gc()
     
-    prox %>%
-      qsave(here(str_c("results/prox_", nm, ".qs")))
+    prox
+  })
+
+# Format proximity enrichment results
+prox_df <- params$xen_sample_names[names(gio_dirs)] %>%
+  unname() %>%
+  map_dfr(~ {
+    obj <- qload(here(str_c("results/prox_", .x, ".qs")))
+    
+    obj$enrichm_res %>%
+      as_tibble() %>%
+      mutate(sample = .x)
+  })
+
+prox_df %>%
+  write_tsv(here("results/prox.tsv.gz"))
+```
+
+```{r "T cell proximity", include = FALSE, eval = create_giotto}
+prox_res <- gio_dirs[1] %>%
+  imap(~ {
+    # Create Giotto object
+    # * store custom targets as separate assay
+    nm <- str_c("_", params$xen_sample_names[[.y]], "_bulk")
+    
+    meta <- xen_dat %>%
+      filter(fov == .y) %>%
+      select(cell_ID = .cell_id, cell_type) %>%
+      mutate(cell_ID = str_remove(cell_ID, "^[0-9A-Z\\-]+_"))
+    
+    prox <- meta %>%
+      run_giotto(
+        xen_dir     = .x,
+        clmn        = "cell_type",
+        file_dir    = "results",
+        file_prefix = nm
+      )
     
     gc()
     

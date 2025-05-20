@@ -1292,6 +1292,52 @@ export_matrices <- function(sobj_in, assays = "RNA", gene_prefix = "", columns,
     readr::write_tsv(meta_out)
 }
 
+#' Run Giotto cell proximity enrichment analysis
+#' 
+#' @param meta_in Dataframe containing cell meta.data.
+#' cell barcodes should be stored in the "cell_ID" column and must match cell
+#' barcodes found in `xen_dir`, e.g. they should not contain any sample prefixes
+#' @param xen_dir Directory containing output from xenium ranger
+#' @param clmn Column containing cell clusters to use for proximity calculations
+#' @param file_dir Directory to save output objects
+#' @param file_prefix File prefix to use when saving objects
+#' @export
+run_giotto <- function(meta_in, xen_dir, clmn, file_dir = NULL,
+                       file_prefix = "") {
+  meta <- meta_in %>%
+    readCellMetadata()
+  
+  obj <- xen_dir %>%
+    createGiottoXeniumObject() %>%
+    setCellMetadata(meta)
+  
+  # Spatial network
+  obj <- obj %>%
+    createSpatialDelaunayNetwork(
+      spat_unit = "cell",
+      feat_type = "rna"
+    )
+  
+  # Spatial correlation
+  prox <- obj %>%
+    cellProximityEnrichment(
+      spat_unit      = "cell",
+      feat_type      = "rna",
+      cluster_column = clmn
+    )
+  
+  # Save objects
+  if (!is.null(file_dir)) {
+    obj %>%
+      qsave(here(file_dir, str_c("gio", file_prefix, ".qs")))
+    
+    prox %>%
+      qsave(here(file_dir, str_c("prox", file_prefix, ".qs")))
+  }
+  
+  prox
+}
+
 
 # Plotting ----
 
