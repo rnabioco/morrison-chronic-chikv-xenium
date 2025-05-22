@@ -427,9 +427,8 @@ heat_dat %>%
 
 Cell types were annotated using 28 dpi CHIKV scRNA-seq data.
 Annotated cell types are shown for tissue sections.
-All CHIKV+ cells are shown, all other cells were downsampled for visualization.
 
-```{r "cell type sections", fig.width = 12, fig.height = 10}
+```{r "cell type sections", fig.width = 18, fig.height = 15}
 # Legend labels
 cell_n <- xen_dat %>%
   group_by(cell_type) %>%
@@ -450,12 +449,12 @@ lgnd_labs <- set_names(cell_n$n_lab, cell_n$cell_type)
 # Create section plots
 plts <- fovs %>%
   map(~ {
-    p <- small_dat %>%
+    p <- xen_dat %>%
       filter(fov == .x) %>%
       mutate(cell_type = fct_relevel(cell_type, cell_n$cell_type)) %>%
       arrange(cell_type) %>%
       ggplot(aes(x_cell, y_cell, color = cell_type)) +
-      geom_point(size = 0.25) +
+      geom_point(size = 0.0001) +
       guides(color = guide_legend(override.aes = list(shape = 15, size = 4))) +
       scale_color_manual(values = typ_clrs) +
       labs(tag = params$xen_sample_names[[.x]]) +
@@ -465,7 +464,7 @@ plts <- fovs %>%
       theme(
         legend.position   = "none",
         plot.tag.position = c(0.15, 0.95),
-        plot.tag          = element_text(size = ttl_pt2)
+        plot.tag          = element_text(size = ttl_pt2 * 1.5)
       )
     p
   })
@@ -497,18 +496,22 @@ ht <- ht_dat %>%
   geom_col() +
   geom_text(
     aes(label = n_lab, fill = NULL),
-    vjust = -0.1
+    vjust = -0.1,
+    size = txt_pt1 * 1.5 / .pt
   ) +
   facet_wrap(~ cell_type, scale = "free_y") +
   scale_fill_manual(values = typ_clrs) +
-  scale_y_continuous(labels = label_percent(), expand = expansion(c(0.05, 0.25))) +
+  scale_y_continuous(labels = label_percent(), breaks = breaks_pretty(n = 3), expand = expansion(c(0.05, 0.25))) +
   labs(y = "% of total cells") +
   base_theme +
   theme(
     legend.position = "none",
     axis.title.x    = element_blank(),
-    axis.text.x     = element_text(angle = 45, hjust = 1),
-    axis.text.y     = element_text(size = txt_pt1)
+    axis.title.y    = element_text(size = txt_pt2 * 1.5),
+    axis.text.x     = element_text(size = txt_pt1 * 1.5, angle = 45, hjust = 1),
+    axis.text.y     = element_text(size = txt_pt1 * 1.2),
+    
+    strip.text      = element_text(size = ttl_pt2 * 1.5)
   )
 
 # Create final figure
@@ -587,87 +590,24 @@ fovs %>%
 ### {.tabset .tabset-pills}
 
 Heatmaps show the spatial distribution of cell types for each sample.
-Only cell types with at least 250 cells are shown, cells with no assigned
-cell type are excluded.
 
-```{r "xenium cell type sections", fig.width = 14, fig.height = 14, results = "asis"}
+```{r "xenium cell type sections", fig.width = 14, fig.height = 12, results = "asis"}
+# Set cell types to plot
+xen_typs <- xen_dat$cell_type %>%
+  table() %>%
+  sort(decreasing = TRUE) %>%
+  names()
+
+xen_typs <- xen_typs[xen_typs != "unassigned"]
+
+# Create heatmaps
 fovs %>%
   walk(~ {
     cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
     
-    # Format data for plots
-    # * only show cell types with >100 cells
-    # * do not show unassigned cells
-    plt_dat <- xen_dat %>%
-      filter(fov == .x)
-    
-    xen_typs <- plt_dat$cell_type %>%
-      table() %>%
-      sort(decreasing = TRUE)
-    
-    xen_typs <- xen_typs[xen_typs >= 250]
-    xen_typs <- xen_typs[names(xen_typs) != "unassigned"]
-    
-    # Function to set number of bins based on number of cells
-    fn <- approxfun(c(last(xen_typs), xen_typs[[1]]), c(45, 100))
-    
-    # Create base plot to use for overlaying frequency data
-    n_bins <- floor(fn(max(xen_typs)))
-    
-    base_xen <- plt_dat %>%
-      ggplot(aes(x_cell, y_cell)) +
-      geom_bin2d(
-        aes(fill = NULL),
-        bins = n_bins,
-        linewidth = 1, color = "black", fill = "white"
-      ) +
-      geom_bin2d(
-        aes(fill = NULL),
-        bins = n_bins,
-        color = NA, fill = "white",
-      )
-    
-    # Create plots
-    typ_plts <- names(xen_typs) %>%
-      map(~ {
-        typ <- .x
-        
-        typ_dat <- plt_dat %>%
-          filter(cell_type == typ)
-        
-        ttl <- typ_dat %>%
-          nrow() %>%
-          label_comma()() %>%
-          str_c(typ, " (n = ", ., ")")
-        
-        base_xen +
-          geom_bin2d(
-            data = typ_dat,
-            bins = n_bins
-          ) +
-          
-          ggtitle(ttl) +
-          guides(fill = guide_colorbar(ticks = FALSE)) +
-          scale_fill_gradientn(
-            colours = c("white", "#D7301F"),  # just use red for all slices
-            name = "number of cells"
-          ) +
-          scale_y_reverse() +
-          coord_equal() +
-          umap_theme_2 +
-          theme(
-            plot.title        = element_text(hjust = 0.5),
-            legend.position   = "bottom",
-            legend.key.height = unit(7, "pt"),
-            legend.key.width  = unit(20, "pt"),
-            legend.title      = element_text(size = 10, hjust = 0.5),
-            legend.text       = element_text(size = 10),
-            legend.title.position = "top"
-          )
-      })
-    
-    fig <- typ_plts %>%
-      wrap_plots(ncol = 3)
+    fig <- xen_dat %>%
+      filter(fov == .x) %>%
+      .create_cell_heatmap(groups = xen_typs, n_bins = 100)
     
     print(fig)
     cat("\n\n<br>\n\n<br>\n\n")
@@ -877,7 +817,7 @@ CHIKV+ cells (>0 total CHIKV counts) are shown for tissue sections.
 ```{r "CHIKV+ cell types", fig.width = 17, fig.height = 11}
 .create_class_figure(
   bar_dat       = xen_dat,
-  plot_dat      = small,
+  plot_dat      = xen,
   class_clmn    = "cell_class",
   class         = "high",
   celltype_clmn = "cell_type_2",
@@ -962,77 +902,21 @@ fovs %>%
 Heatmaps show the spatial distribution of CHIKV+ cells for each cell type.
 Only cell types with at least 20 CHIKV+ cells for all replicates are shown.
 
-```{r "CHIKV+ heatmap sections", fig.width = 14, fig.height = 14, results = "asis"}
+```{r "CHIKV+ heatmap sections", fig.width = 14, fig.height = 10, results = "asis"}
 fovs %>%
   walk(~ {
     cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
     
-    # Format data for plots
-    # * only show cell types with >100 cells
-    # * do not show unassigned cells
-    plt_dat <- xen_dat %>%
+    dat <- xen_dat %>%
       filter(fov == .x)
     
-    # Create base plot to use for overlaying frequency data
-    n_bins <- 75
-    
-    base_xen <- plt_dat %>%
-      ggplot(aes(x_cell, y_cell)) +
-      geom_bin2d(
-        aes(fill = NULL),
-        bins = n_bins,
-        linewidth = 1, color = "black", fill = "white"
-      ) +
-      geom_bin2d(
-        aes(fill = NULL),
-        bins = n_bins,
-        color = NA, fill = "white",
+    fig <- dat %>%
+      .create_cell_heatmap(
+        count_dat = filter(., cell_class == "high"),
+        groups    = names(sort(chikv_types, decreasing = TRUE)),
+        n_bins    = 75,
+        n_col     = 4
       )
-    
-    # Create plots
-    typ_plts <- names(sort(chikv_types, decreasing = TRUE)) %>%
-      map(~ {
-        typ <- .x
-        
-        typ_dat <- plt_dat %>%
-          filter(
-            cell_type == typ,
-            cell_class == "high"
-          )
-        
-        ttl <- typ_dat %>%
-          nrow() %>%
-          label_comma()() %>%
-          str_c(typ, " (n = ", ., ")")
-        
-        base_xen +
-          geom_bin2d(
-            data = typ_dat,
-            bins = n_bins
-          ) +
-          
-          ggtitle(ttl) +
-          guides(fill = guide_colorbar(ticks = FALSE)) +
-          scale_fill_gradientn(
-            colours = c("white", "#D7301F"),  # just use red for all slices
-            name = "number of cells"
-          ) +
-          coord_equal() +
-          scale_y_reverse() +
-          umap_theme_2 +
-          theme(
-            plot.title        = element_text(hjust = 0.5),
-            legend.position   = "bottom",
-            legend.key.height = unit(7, "pt"),
-            legend.key.width  = unit(20, "pt"),
-            legend.title      = element_text(size = 10, hjust = 0.5),
-            legend.text       = element_text(size = 10),
-            legend.title.position = "top"
-          )
-      })
-    
-    fig <- typ_plts %>%
-      wrap_plots(ncol = 3)
     
     print(fig)
     cat("\n\n<br>\n\n<br>\n\n")
@@ -1436,6 +1320,7 @@ xen_dat <- xen_dat %>%
     chikv_class = case_when(
       CHIKV_sgRNA > 0 & CHIKV_5 > 0 & CHIKV_neg > 0 ~ "3'/5'/neg",
       CHIKV_sgRNA > 0 & CHIKV_5 > 0                 ~ "3'/5'",
+      CHIKV_sgRNA > 0 & CHIKV_neg > 0               ~ "3'/neg",
       CHIKV_sgRNA > 0                               ~ "3'",
       CHIKV_5 > 0 & CHIKV_neg > 0                   ~ "5'/neg",
       CHIKV_5 > 0                                   ~ "5'",
@@ -1465,8 +1350,12 @@ n_dat <- grp_dat %>%
   )
 
 # Create bargraphs
+lvls <- c("Macrophages", "Fibroblasts")
+
 grp_dat %>%
-  filter(cell_type %in% c("Macrophages", "Fibroblasts")) %>%
+  filter(cell_type %in% lvls) %>%
+  mutate(cell_type = fct_relevel(cell_type, lvls)) %>%
+  
   ggplot(aes(sample, fill = chikv_class)) +
   geom_bar(position = "fill") +
   geom_text(
@@ -1529,7 +1418,7 @@ create_giotto <- !file.exists(here("results/prox.tsv.gz"))
   re  <- str_replace_all(re, "\\)", "\\\\)")
   re  <- str_c(re, " \\(CHIKV\\+\\)")
   
-  dat <- prox_df %>%
+  dat <- df_in %>%
     arrange(sample, enrichm) %>%
     mutate(
       highlight = grepl(re, unified_int),
@@ -1554,7 +1443,7 @@ create_giotto <- !file.exists(here("results/prox.tsv.gz"))
       data    = ~ filter(.x, highlight & significant & enrichm > 0),
       nudge_y = 1,
       hjust   = 1,
-      size    = 5 / .pt,
+      size    = 7/ .pt,
       min.segment.length = 0
     ) +
     geom_text_repel(
@@ -1562,7 +1451,7 @@ create_giotto <- !file.exists(here("results/prox.tsv.gz"))
       data    = ~ filter(.x, highlight & significant & enrichm < 0),
       nudge_y = -1,
       hjust   = 1,
-      size    = 5 / .pt,
+      size    = 7 / .pt,
       min.segment.length = 0
     ) +
     facet_wrap(~ sample, nrow = 1, scales = "free") +
@@ -1651,7 +1540,7 @@ prox_df %>%
   write_tsv(here("results/prox.tsv.gz"))
 ```
 
-```{r "T cell proximity", include = FALSE, eval = create_giotto}
+```{r "T cell proximity", include = FALSE, eval = FALSE}
 prox_res <- gio_dirs[1] %>%
   imap(~ {
     # Create Giotto object
