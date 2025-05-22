@@ -1541,7 +1541,7 @@ prox_df %>%
 ```
 
 ```{r "T cell proximity", include = FALSE, eval = FALSE}
-prox_res <- gio_dirs[1] %>%
+prox_res <- gio_dirs %>%
   imap(~ {
     # Create Giotto object
     # * store custom targets as separate assay
@@ -1569,7 +1569,7 @@ prox_res <- gio_dirs[1] %>%
 prox_df <- params$xen_sample_names[names(gio_dirs)] %>%
   unname() %>%
   map_dfr(~ {
-    obj <- qload(here(str_c("results/prox_", .x, ".qs")))
+    obj <- qload(here(str_c("results/prox_", .x, "_bulk.qs")))
     
     obj$enrichm_res %>%
       as_tibble() %>%
@@ -1577,7 +1577,7 @@ prox_df <- params$xen_sample_names[names(gio_dirs)] %>%
   })
 
 prox_df %>%
-  write_tsv(here("results/prox.tsv.gz"))
+  write_tsv(here("results/prox_bulk.tsv.gz"))
 ```
 
 Cell-cell interaction enrichment is shown for each biological replicate for
