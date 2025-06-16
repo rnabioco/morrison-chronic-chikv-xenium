@@ -695,8 +695,7 @@ if (!is.null(key_targets)) {
 xen <- xen %>%
   mutate_meta(
     mutate,
-    sample     = sample_names[as.character(fov)],
-    class_type = ifelse(cell_class == "high", cell_type, "low")
+    sample = sample_names[as.character(fov)]
   )
           
 if (str_length(sample_delim) > 0 && all(str_detect(sample_names, sample_delim))) {

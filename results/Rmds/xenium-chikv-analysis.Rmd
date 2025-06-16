@@ -37,7 +37,7 @@ params:
       CHIKV_5:     "CHIKV-5-(0-7566)"                                                # Custom targets to quantify
       CHIKV_neg:   "CHIKV-negative-(0-12036)"
 editor_options: 
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 
 <br>
@@ -149,6 +149,11 @@ xen <- xen %>%
       cell_type %in% main_types,
       cell_type,
       "other"
+    ),
+    class_type = ifelse(
+      cell_class == "high",
+      cell_type,
+      "CHIKV-"
     ),
     class_type_2 = if_else(
       cell_class == "low",
@@ -870,7 +875,7 @@ fovs %>%
     plt <- xen_dat %>%
       .plot_full_fov(
         fov   = .x,
-        color = "class_type",
+        color = "class_type_2",
         clrs  = typ_clrs,
         trace = "NONE"
       )
