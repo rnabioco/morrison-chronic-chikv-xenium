@@ -16,6 +16,7 @@ params:
   table_dir:    "results/tables"          # Directory to write tables
   overwrite:    false                     # Should tables be overwritten if they already exist?
   so_dir:       "~/Dropbox/Ryan/Projects/morrison-chronic-chikv/results/sobjs/2024-01-22_4" # Directory for Seurat objects
+  geo_dir:      "~/Projects/morrison-chronic-chikv/results/geo"
   treatment_levels: ["mock", "CHIKV"]  # order as control, treatment, order affects how marker genes are identified
   xen_obj_dir:      "~/Dropbox/Ryan/Projects/morrison-chronic-chikv/results/xenium"  # Directory to save Xenium objects
   xen_ref:          "~/Dropbox/Ryan/Projects/morrison-chronic-chikv/results/sobjs/2024-01-22_4/so.qs"
@@ -37,7 +38,7 @@ params:
       CHIKV_5:     "CHIKV-5-(0-7566)"                                                # Custom targets to quantify
       CHIKV_neg:   "CHIKV-negative-(0-12036)"
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 <br>
@@ -1660,6 +1661,31 @@ typs %>%
 
 ## Session info
 
-```{r}
+```{r "session info"}
 sessionInfo()
+```
+
+```{r "xenium metadata for geo", eval = FALSE}
+clmns <- c(
+  "cell_id",
+  "fov",
+  "treatment",
+  "rep",
+  "nCount_Xenium",
+  "nFeature_Xenium",
+  "cell_type",
+  "cell_type_2",
+  "pred_conf",
+  "x_cell", "y_cell",
+  "CHIKV_sgRNA",
+  "CHIKV_5",
+  "CHIKV_neg",
+  "CHIKV_class"
+)
+
+xen@meta.data %>%
+  as_tibble(rownames = "cell_id") %>%
+  mutate(CHIKV_class = recode(cell_class, high = "CHIKV+", low = "CHIKV-")) %>%
+  select(all_of(clmns)) %>%
+  write_tsv(here(params$geo_dir, "xenium_metadata.tsv.gz"))
 ```
