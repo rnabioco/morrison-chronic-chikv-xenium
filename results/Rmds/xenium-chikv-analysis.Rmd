@@ -16,6 +16,7 @@ params:
   table_dir:    "results/tables"          # Directory to write tables
   overwrite:    false                     # Should tables be overwritten if they already exist?
   so_dir:       "~/Dropbox/Ryan/Projects/morrison-chronic-chikv/results/sobjs/2024-01-22_4" # Directory for Seurat objects
+  colors:       "~/Projects/morrison-chronic-chikv/ref/celltype_colors.qs"
   geo_dir:      "~/Projects/morrison-chronic-chikv/results/geo"
   treatment_levels: ["mock", "CHIKV"]  # order as control, treatment, order affects how marker genes are identified
   xen_obj_dir:      "~/Dropbox/Ryan/Projects/morrison-chronic-chikv/results/xenium"  # Directory to save Xenium objects
@@ -38,7 +39,7 @@ params:
       CHIKV_5:     "CHIKV-5-(0-7566)"                                                # Custom targets to quantify
       CHIKV_neg:   "CHIKV-negative-(0-12036)"
 editor_options: 
-  chunk_output_type: console
+  chunk_output_type: inline
 ---
 
 <br>
@@ -313,22 +314,42 @@ ito_cols <- ito_cols[3:length(ito_cols)] %>%
 clrs <- ito_cols
 
 # Cell type colors
-typs <- unique(xen$cell_type)
-typs <- typs[typs != "unassigned"]
+# * load from file
+# * use the most distinct colors for the high confidence cell types that will
+#   be included in the main figures
+typ_clrs <- qread(here(params$colors))
+typ_clrs <- typ_clrs[names(typ_clrs) != "unassigned"]
 
-typ_clrs <- set_names(
-  clrs[seq_along(typs)],
-  typs
+main_clrs <- assign_colors(
+  typ_clrs,
+  names  = main_types,
+  filter = "colorblind"
 )
 
-typ_clrs <- typ_clrs %>%
-  spruce_colors(difference = Inf, filter = "colorblind")
+typ_clrs <- set_names(
+  unname(typ_clrs[!typ_clrs %in% main_clrs]),
+  typs[!typs %in% c(main_types, "unassigned")]
+)
 
-typ_clrs[c("CHIKV-", "low", "unassigned")] <- "grey85"
-typ_clrs["other"]            <- "grey50"
-typ_clrs["Macrophages"]      <- "#D7301F"
+typ_clrs <- append(main_clrs, typ_clrs)
+typ_clrs[c("unassigned", "other")] <- "#999999"
 
-typ_clrs["Fibroblasts"] <- darken(typ_clrs["Fibroblasts"], 0.75)
+# typs <- unique(xen$cell_type)
+# typs <- typs[typs != "unassigned"]
+# 
+# typ_clrs <- set_names(
+#   clrs[seq_along(typs)],
+#   typs
+# )
+# 
+# typ_clrs <- typ_clrs %>%
+#   spruce_colors(difference = Inf, filter = "colorblind")
+# 
+# typ_clrs[c("CHIKV-", "low", "unassigned")] <- "grey85"
+# typ_clrs["other"]            <- "grey50"
+# typ_clrs["Macrophages"]      <- "#D7301F"
+# 
+# typ_clrs["Fibroblasts"] <- darken(typ_clrs["Fibroblasts"], 0.75)
 
 # typ_clrs[c("LEC", "BEC", "cDC1")] <- c("#D7301F", "#0072B2", "#6A51A3")
 # typ_clrs[c("LEC", "BEC", "cDC1")] <- c("#56B4E9", "#D7301F", "#6A51A3")
