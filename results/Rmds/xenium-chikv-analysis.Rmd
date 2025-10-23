@@ -39,7 +39,7 @@ params:
       CHIKV_5:     "CHIKV-5-(0-7566)"                                                # Custom targets to quantify
       CHIKV_neg:   "CHIKV-negative-(0-12036)"
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 <br>
@@ -318,55 +318,17 @@ clrs <- ito_cols
 # * use the most distinct colors for the high confidence cell types that will
 #   be included in the main figures
 typ_clrs <- qread(here(params$colors))
-typ_clrs <- typ_clrs[names(typ_clrs) != "unassigned"]
 
-main_clrs <- assign_colors(
-  typ_clrs,
-  names  = main_types,
-  filter = "colorblind"
-)
+main_clrs <- typ_clrs[main_types]
 
-typ_clrs <- set_names(
-  unname(typ_clrs[!typ_clrs %in% main_clrs]),
-  typs[!typs %in% c(main_types, "unassigned")]
-)
-
-typ_clrs <- append(main_clrs, typ_clrs)
-typ_clrs[c("unassigned", "other")] <- "#999999"
-
-# typs <- unique(xen$cell_type)
-# typs <- typs[typs != "unassigned"]
-# 
-# typ_clrs <- set_names(
-#   clrs[seq_along(typs)],
-#   typs
-# )
-# 
-# typ_clrs <- typ_clrs %>%
-#   spruce_colors(difference = Inf, filter = "colorblind")
-# 
-# typ_clrs[c("CHIKV-", "low", "unassigned")] <- "grey85"
-# typ_clrs["other"]            <- "grey50"
-# typ_clrs["Macrophages"]      <- "#D7301F"
-# 
-# typ_clrs["Fibroblasts"] <- darken(typ_clrs["Fibroblasts"], 0.75)
-
-# typ_clrs[c("LEC", "BEC", "cDC1")] <- c("#D7301F", "#0072B2", "#6A51A3")
-# typ_clrs[c("LEC", "BEC", "cDC1")] <- c("#56B4E9", "#D7301F", "#6A51A3")
-# typ_clrs[c("LEC", "cDC1", "Monocytes", "B cells")] <- c("#0072B2", "#6A51A3", "#D55E00", "#56B4E9")
-# typ_clrs["Macrophages"] <- "black"
+typ_clrs[c("CHIKV-", "low", "unassigned")] <- "grey85"
+typ_clrs["other"] <- "grey50"
 
 top_typ_clrs <- typ_clrs
 top_typ_clrs[!names(top_typ_clrs) %in% top_types] <- "grey85"
 
 top_typ_clrs_2 <- top_typ_clrs
 top_typ_clrs_2[!names(top_typ_clrs_2) %in% top_types] <- "grey99"
-
-# # Sample colors
-# sam_clrs <- set_names(
-#   c("#009E73", "#0072B2", "#56B4E9"),
-#   c(sam_lvls, "Mock")
-# )
 ```
 
 ```{r "QC", eval = FALSE}
@@ -471,6 +433,16 @@ cell_n <- xen_dat %>%
   ) %>%
   arrange(desc(n))
 
+# Set cell type order for plotting
+# * include the "other" group
+type_order <- xen_dat$cell_type_2 %>%
+  table() %>%
+  sort(decreasing = TRUE) %>%
+  names()
+
+type_order <- unique(c(type_order, cell_n$cell_type))
+type_order <- unique(c(type_order, "Macrophages"), fromLast = TRUE)
+
 lgnd_labs <- set_names(cell_n$n_lab, cell_n$cell_type)
 
 # Create section plots
@@ -478,7 +450,7 @@ plts <- fovs %>%
   map(~ {
     p <- xen_dat %>%
       filter(fov == .x) %>%
-      mutate(cell_type = fct_relevel(cell_type, cell_n$cell_type)) %>%
+      mutate(cell_type = fct_relevel(cell_type, type_order)) %>%
       arrange(cell_type) %>%
       ggplot(aes(x_cell, y_cell, color = cell_type)) +
       geom_point(size = 0.0001) +
@@ -598,7 +570,9 @@ fovs %>%
         color  = "cell_type_2",
         trace  = list("NONE", "Macrophages"),
         clrs   = typ_clrs,
-        show_n = FALSE
+        show_n = FALSE,
+        size   = 0.7,
+        lvls   = type_order
       ) %>%
       plot_grid(
         plotlist = .,
@@ -890,16 +864,21 @@ High-resolution images show CHIKV counts (left) and CHIKV+ cells (right)
 for each tissue section.
 
 ```{r, fig.width = 45, fig.height = 10, results = "asis", out.height = "70%"}
+typs <- names(typ_clrs)
+typs <- typs[!typs %in% c("CHIKV-", "low")]
+
 fovs %>%
   walk(~ {
     cat("\n\n####", params$xen_sample_names[[.x]], "\n\n")
     
     plt <- xen_dat %>%
       .plot_full_fov(
-        fov   = .x,
-        color = "class_type_2",
-        clrs  = typ_clrs,
-        trace = "NONE"
+        fov        = .x,
+        color      = "class_type_2",
+        clrs       = typ_clrs,
+        trace      = list(typs),
+        trace_size = 3.5,
+        trace_clr  = NA
       )
     
     sig <- xen_dat %>%
@@ -909,7 +888,8 @@ fovs %>%
         clrs   = c("white", "#D7301F"),
         ttl    = "CHIKV\ncounts + 1",
         pseudo = 1,
-        trans  = "log10"
+        trans  = "log10",
+        signal_size = 3.5
       )
     
     fig <- plot_grid(

@@ -45,7 +45,7 @@ create_sobjs <- !file.exists(here(obj_dir, str_c(obj_prfx, ".qs")))
 ```{r "{{obj_prfx}} functions"}
 .plot_full_fov <- function(df_in, fov_in, color, x = "x_cell", y = "y_cell",
                            trace = list(), clrs, lvls = NULL, size = 0.3,
-                           trace_size = 1, trace_clr = "black", show_n = TRUE) {
+                           trace_size = 2, trace_clr = "black", show_n = TRUE) {
   
   # Format input data
   plt_theme <- umap_theme +
@@ -99,8 +99,10 @@ create_sobjs <- !file.exists(here(obj_dir, str_c(obj_prfx, ".qs")))
 
 .plot_full_fov_signal <- function(df_in, fov_in, color, x = "x_cell", y = "y_cell",
                                   clrs = c("white", "#D7301F"),
-                                  size = 0.3, pseudo = 1, trans = "log10",
-                                  ttl = NULL, ...) {
+                                  size = 1, pseudo = 1, trans = "log10",
+                                  ttl = NULL, signal_size = 2, ...) {
+  
+  highlight_signal <- signal_size != size
   
   # Format input data
   plt_theme <- umap_theme +
@@ -112,20 +114,47 @@ create_sobjs <- !file.exists(here(obj_dir, str_c(obj_prfx, ".qs")))
     )
   
   dat <- df_in %>%
-    filter(fov == fov_in)
+    filter(fov == fov_in) %>%
+    arrange(!!sym(color))
+  
+  if (highlight_signal) {
+    trace_dat <- dat %>%
+      filter(!!sym(color) > 0)
+    
+    dat <- dat %>%
+      filter(!!sym(color) == 0)
+  }
   
   res <- dat %>%
-    arrange(!!sym(color)) %>%
     ggplot(aes(!!sym(x), -(!!sym(y)), fill = !!sym(color) + pseudo)) +
     geom_point_trace(
-      size = 1,
+      size = size,
       stroke = 0.5,
       ...
     ) +
-    scale_fill_gradientn(colours = clrs, trans = trans) +
-    guides(fill = guide_colorbar(ticks = FALSE, title = ttl)) +
     coord_fixed() +
     plt_theme
+    
+  if (highlight_signal) {
+    res <- res +
+      geom_point(
+        aes(color = !!sym(color) + pseudo),
+        data = trace_dat,
+        size = signal_size
+      ) +
+      scale_fill_gradientn(colours = clrs[1], trans = trans) +
+      scale_color_gradientn(colours = clrs, trans = trans) +
+      guides(
+        color = guide_colorbar(ticks = FALSE, title = ttl),
+        fill = "none"
+      ) +
+      expand_limits(color = pseudo)
+
+  } else {
+    res <- res +
+      scale_fill_gradientn(colours = clrs, trans = trans) +
+      guides(fill = guide_colorbar(ticks = FALSE, title = ttl))
+  }
   
   res
 }
