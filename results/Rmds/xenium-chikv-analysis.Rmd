@@ -46,30 +46,9 @@ editor_options:
 
 ## Summary
 
-* Cell types were annotated using CHIKV 28 dpi scRNA-seq data
-* Macrophages harbor CHIKV RNA
-* Signal was detected for CHIKV 3' (sgRNA), 5' (nsP genes), and negative strand probes
-* The strongest CHIKV signal was detected for 3' probes
-
-<u>To do</u>
-
-- [x] &nbsp;Heatmap of all of the ankles showing spatial distribution of each
-  cell type.
-- [x] &nbsp;For CHIKV infection sections, label the total number of CHIKV RNA+
-  cells for each individual ankle instead of all of them together.
-  As well as graph the total number of CHIKV RNA+ cells for each cell subset
-  instead of the % CHIKV RNA+ cells.
-- [x] &nbsp;For that same section, make a cutoff of 20 cells so any cell types
-  with fewer than 20 CHIKV+ cells would be excluded.
-- [x] &nbsp;Change "low" to CHIKV RNA negative
-- [x] &nbsp;Change the CHIKV RNA species bar graphs to only include cell types
-  that are above the 0.5 confidence interval.
-  So take out unassigned.
-- [x] &nbsp;Change the subgenomic label in the axis to 3' and take out the mock
-  samples.
-- [ ] &nbsp;Double check that cells labeled “DC” are not actually macrophages.
-  This came up because CHIKV RNA+ DC have the highest enrichment for interaction
-  with CHIKV RNA+ macrophages.
+* Adjusted colors for cell types
+* Increased point size for [high resolution plots](#hires) showing CHIKV counts
+  and CHIKV+ cells
 
 <br>
 
@@ -858,7 +837,7 @@ fovs %>%
   })
 ```
 
-### {.tabset .tabset-pills}
+### {.tabset .tabset-pills #hires}
 
 High-resolution images show CHIKV counts (left) and CHIKV+ cells (right)
 for each tissue section.
