@@ -56,6 +56,30 @@ editor_options:
 
 ---
 
+```{r "LOAD PARAMS INTERACTIVELY", eval = FALSE}
+# This is needed to correctly load params into environment when using Positron
+collapse_list <- function(x) {
+  # If it's a list with only one element that is also a list, collapse it
+  while (is.list(x) && length(x) == 1 && is.list(x[[1]])) {
+    x <- x[[1]]
+  }
+  
+  # Recursively apply to all elements if still a list
+  if (is.list(x)) {
+    x <- lapply(x, collapse_list)
+  }
+  
+  x
+}
+
+# Extract current file path
+rmd <- rstudioapi::getSourceEditorContext()$path
+
+# Extract params from YAML
+params <- rmarkdown::yaml_front_matter(rmd)$params
+params <- collapse_list(params)
+```
+
 ```{r "setup", include = FALSE}
 # Default chunk options
 knitr::opts_chunk$set(
@@ -96,6 +120,10 @@ chunk_params <- list(
 chunks <- do.call(knit_expand, chunk_params)
 
 knit(text = chunks, output = "")
+
+# Create figure output directory
+fig_dir <- here("results/figures")
+dir.create(fig_dir, showWarnings = FALSE, recursive = TRUE)
 ```
 
 ```{r "format data"}
@@ -500,6 +528,11 @@ fig <- plot_grid(
 )
 
 fig
+
+ggsave(
+  file.path(fig_dir, "cell_type_sections.pdf"),
+  plot = fig, device = cairo_pdf, width = 18, height = 15
+)
 ```
 
 <br>
@@ -526,6 +559,10 @@ fovs %>%
       )
     
     print(fig)
+    ggsave(
+      file.path(fig_dir, str_c("top_cell_types_sections_", params$xen_sample_names[[.x]], ".pdf")),
+      plot = fig, device = cairo_pdf, width = 16, height = 8
+    )
     cat("\n\n<br>\n\n<br>\n\n")
   })
 ```
@@ -561,6 +598,10 @@ fovs %>%
       )
     
     print(fig)
+    ggsave(
+      file.path(fig_dir, str_c("hi_res_cell_types_sections_", params$xen_sample_names[[.x]], ".pdf")),
+      plot = fig, device = cairo_pdf, width = 45, height = 10
+    )
     cat("\n\n<br>\n\n<br>\n\n")
   })
 ```
@@ -590,6 +631,10 @@ fovs %>%
       .create_cell_heatmap(groups = xen_typs, n_bins = 100)
     
     print(fig)
+    ggsave(
+      file.path(fig_dir, str_c("xenium_cell_type_sections_", params$xen_sample_names[[.x]], ".pdf")),
+      plot = fig, device = cairo_pdf, width = 14, height = 12
+    )
     cat("\n\n<br>\n\n<br>\n\n")
   })
 ```
@@ -607,7 +652,7 @@ dat <- xen_dat %>%
     cell_type = fct_reorder(cell_type, pred_conf, .desc = TRUE)
   )
 
-dat %>%
+fig <- dat %>%
   ggplot(aes(cell_type, pred_conf, fill = cell_type)) +
   geom_hline(yintercept = 0.5, linetype = 2, linewidth = 0.5) +
   geom_boxplot(outlier.size = 0.2) +
@@ -620,6 +665,13 @@ dat %>%
     axis.text.x     = element_text(angle = 45, hjust = 1),
     axis.title.x    = element_blank()
   )
+
+fig
+
+ggsave(
+  file.path(fig_dir, "pred_confidence.pdf"),
+  plot = fig, device = cairo_pdf, width = 9, height = 4
+)
 ```
 
 <br>
@@ -707,6 +759,10 @@ plts %>%
   iwalk(~ {
     cat("\n\n####", .y, "\n\n")
     print(.x)
+    ggsave(
+      file.path(fig_dir, str_c("cell_type_markers_", .y, ".pdf")),
+      plot = .x, device = cairo_pdf, width = 15, height = 15
+    )
     cat("\n\n<br>\n\n<br>\n\n")
   })
 ```
@@ -773,7 +829,7 @@ dat <- xen %>%
 marks %>%
   iwalk(~ {
     cat("\n\n####", .y, "\n\n")
-    
+
     plt <- dat %>%
       create_feat_boxes(
         grp_column    = "cell_type",
@@ -782,8 +838,12 @@ marks %>%
         highlight_grp = .y,
         y_ttl         = "normalized expression"
       )
-    
+
     print(plt)
+    ggsave(
+      file.path(fig_dir, str_c("cell_type_marker_degs_", .y, ".pdf")),
+      plot = plt, device = cairo_pdf, width = 15, height = 8
+    )
     cat("\n\n---\n\n<br>\n\n<br>\n\n")
   })
 ```
@@ -795,7 +855,7 @@ marks %>%
 CHIKV+ cells (>0 total CHIKV counts) are shown for tissue sections.
 
 ```{r "CHIKV+ cell types", fig.width = 17, fig.height = 11}
-.create_class_figure(
+fig <- .create_class_figure(
   bar_dat       = xen_dat,
   plot_dat      = xen,
   class_clmn    = "cell_class",
@@ -806,6 +866,13 @@ CHIKV+ cells (>0 total CHIKV counts) are shown for tissue sections.
   nrow          = 3,
   y_ttl         = "# CHIKV+ cells",
   alph          = rep(1, n_distinct(xen_dat$rep))
+)
+
+fig
+
+ggsave(
+  file.path(fig_dir, "chikv_pos_cell_types.pdf"),
+  plot = fig, device = cairo_pdf, width = 17, height = 11
 )
 ```
 
@@ -833,6 +900,10 @@ fovs %>%
       )
     
     print(fig)
+    ggsave(
+      file.path(fig_dir, str_c("top_cell_types_chikv_pos_sections_", params$xen_sample_names[[.x]], ".pdf")),
+      plot = fig, device = cairo_pdf, width = 16, height = 8
+    )
     cat("\n\n<br>\n\n<br>\n\n")
   })
 ```
@@ -856,7 +927,7 @@ fovs %>%
         color      = "class_type_2",
         clrs       = typ_clrs,
         trace      = list(typs),
-        trace_size = 3.5,
+        trace_size = 2,
         trace_clr  = NA
       )
     
@@ -868,7 +939,7 @@ fovs %>%
         ttl    = "CHIKV\ncounts + 1",
         pseudo = 1,
         trans  = "log10",
-        signal_size = 3.5
+        signal_size = 2
       )
     
     fig <- plot_grid(
@@ -879,6 +950,11 @@ fovs %>%
     )
       
     print(fig)
+
+    ggsave(
+      file.path(fig_dir, str_c("hi_res_chikv_sections_", params$xen_sample_names[[.x]], ".pdf")),
+      plot = fig, device = cairo_pdf, width = 45, height = 10
+    )
     cat("\n\n")
   })
 ```
@@ -905,6 +981,10 @@ fovs %>%
       )
     
     print(fig)
+    ggsave(
+      file.path(fig_dir, str_c("chikv_pos_heatmap_sections_", params$xen_sample_names[[.x]], ".pdf")),
+      plot = fig, device = cairo_pdf, width = 14, height = 10
+    )
     cat("\n\n<br>\n\n<br>\n\n")
   })
 ```
@@ -942,7 +1022,7 @@ n_dat <- type_dat %>%
 # Fraction CHIKV reads boxplots
 pseudo <- 0.01
 
-type_dat %>%
+fig <- type_dat %>%
   ggplot(aes(cell_type, frac_key_feats + pseudo, fill = cell_type, alpha = as.character(rep))) +
   geom_boxplot(
     outlier.size = 0.1,
@@ -966,6 +1046,13 @@ type_dat %>%
     axis.title.x = element_blank(),
     axis.text.x  = element_text(angle = 45, hjust = 1)
   )
+
+fig
+
+ggsave(
+  file.path(fig_dir, "chikv_counts_cell_types.pdf"),
+  plot = fig, device = cairo_pdf, width = 15, height = 6
+)
 ```
 
 ```{r "CHIKV SIGNAL CELL TYPES", fig.width = 15, fig.height = 4}
@@ -992,7 +1079,7 @@ n_dat <- dat %>%
   )
 
 # Fraction CHIKV reads boxplots
-dat %>%
+fig <- dat %>%
   ggplot(aes(cell_type, frac_key_feats, fill = cell_type)) +
   geom_boxplot(
     outlier.size = 0.1,
@@ -1016,6 +1103,13 @@ dat %>%
     axis.title.x = element_blank(),
     axis.text.x  = element_text(angle = 45, hjust = 1)
   )
+
+fig
+
+ggsave(
+  file.path(fig_dir, "chikv_signal_cell_types.pdf"),
+  plot = fig, device = cairo_pdf, width = 15, height = 4
+)
 ```
 
 <br>
@@ -1064,7 +1158,7 @@ lbs <- c(
 )
 
 # Create bargraphs
-bar_dat %>%
+fig <- bar_dat %>%
   filter(cell_type %in% c("Macrophages", "Fibroblasts")) %>%
   ggplot(aes(cell_type, frac_pos, fill = cell_type, group = sample)) +
   geom_col(position = position_dodge(width = 0.95)) +
@@ -1082,6 +1176,13 @@ bar_dat %>%
     legend.position = "none",
     axis.title.x    = element_blank()
   )
+
+fig
+
+ggsave(
+  file.path(fig_dir, "chikv_pos_bargraphs_paper.pdf"),
+  plot = fig, device = cairo_pdf, width = 8, height = 4
+)
 ```
 
 ```{r "CHIKV+ bargraphs", fig.width = 10, fig.height = 4, out.width = "70%"}
@@ -1110,7 +1211,7 @@ bar_dat <- xen_dat %>%
   )
 
 # Create bargraphs
-bar_dat %>%
+fig <- bar_dat %>%
   ggplot(aes(cell_type, frac_pos, fill = cell_type)) +
   geom_col() +
   geom_text(
@@ -1127,6 +1228,13 @@ bar_dat %>%
     axis.text.x     = element_text(angle = 45, hjust = 1),
     axis.title.x    = element_blank()
   )
+
+fig
+
+ggsave(
+  file.path(fig_dir, "chikv_pos_bargraphs.pdf"),
+  plot = fig, device = cairo_pdf, width = 10, height = 4
+)
 ```
 
 ```{r "CHIKV+ bargraphs DATA CLUB", fig.width = 10, fig.height = 4, out.width = "70%", eval = FALSE}
@@ -1283,10 +1391,17 @@ plts <- names(chikv_types[1:4]) %>%
       )
   })
 
-wrap_plots(
+fig <- wrap_plots(
   plts,
   guides = "collect",
   nrow = 1
+)
+
+fig
+
+ggsave(
+  file.path(fig_dir, "chikv_signal_types.pdf"),
+  plot = fig, device = cairo_pdf, width = 15, height = 4
 )
 ```
 
@@ -1338,10 +1453,9 @@ n_dat <- grp_dat %>%
 # Create bargraphs
 lvls <- c("Macrophages", "Fibroblasts")
 
-grp_dat %>%
+fig <- grp_dat %>%
   filter(cell_type %in% lvls) %>%
   mutate(cell_type = fct_relevel(cell_type, lvls)) %>%
-  
   ggplot(aes(sample, fill = chikv_class)) +
   geom_bar(position = "fill") +
   geom_text(
@@ -1359,11 +1473,18 @@ grp_dat %>%
     axis.title.x = element_blank(),
     axis.text.x  = element_text(angle = 45, hjust = 1)
   )
+
+fig
+
+ggsave(
+  file.path(fig_dir, "chikv_signal_groups_paper.pdf"),
+  plot = fig, device = cairo_pdf, width = 6, height = 4
+)
 ```
 
 ```{r "CHIKV SIGNAL GROUPS", fig.width = 10, fig.height = 5, out.width = "70%"}
 # Create bargraphs
-grp_dat %>%
+fig <- grp_dat %>%
   ggplot(aes(sample, fill = chikv_class)) +
   geom_bar(position = "fill") +
   geom_text(
@@ -1381,6 +1502,13 @@ grp_dat %>%
     axis.title.x = element_blank(),
     axis.text.x  = element_text(angle = 45, hjust = 1)
   )
+
+fig
+
+ggsave(
+  file.path(fig_dir, "chikv_signal_groups.pdf"),
+  plot = fig, device = cairo_pdf, width = 10, height = 5
+)
 ```
 
 ---
@@ -1609,8 +1737,15 @@ prox_df <- prox_df %>%
   )
 
 # Create proximity bargraph
-prox_df %>%
+fig <- prox_df %>%
   .create_prox_bars("Macrophages")
+
+fig
+
+ggsave(
+  file.path(fig_dir, "proximity_Macrophages.pdf"),
+  plot = fig, device = cairo_pdf, width = 15, height = 3.75
+)
 ```
 
 <br>
@@ -1633,8 +1768,12 @@ typs %>%
     
     plt <- prox_df %>%
       .create_prox_bars(.y)
-    
+
     print(plt)
+    ggsave(
+      file.path(fig_dir, str_c("proximity_", .y, ".pdf")),
+      plot = plt, device = cairo_pdf, width = 15, height = 3.75
+    )
     cat("\n\n---\n\n<br>\n\n<br>\n\n")
   })
 ```

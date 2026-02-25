@@ -14,7 +14,7 @@ library(tidyverse)
 library(broom)
 library(here)
 library(cowplot)
-library(xlsx)
+# library(xlsx)
 library(furrr)
 
 # Plotting
